@@ -297,6 +297,13 @@ describe('FormatFacturXService', () => {
 	});
 
 	describe('XML attachment to PDF', () => {
+		it("should return XML if no PDF is attached", async () => {
+			mockOptions.pdf = undefined;
+
+			const xml = await service.generate(mockInvoice, mockOptions);
+			expect(xml).toBe('<invoice></invoice>');
+		});
+
 		it("should use 'factur-x.xml' as the filename for Factur-X-Minimum", async () => {
 			mockOptions.format = 'Factur-X-Minimum';
 

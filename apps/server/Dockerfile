@@ -1,15 +1,12 @@
 # Stage 1: Build stage
-FROM alpine:latest AS builder
+FROM node:20-alpine AS builder
 
 ENV NODE_ENV=production
-ENV LIBREOFFICE=libreoffice
 
 RUN apk add --no-cache \
 	bash \
 	curl \
-	nodejs \
-	npm \
-	libc6-compat
+    git
 
 RUN npm install -g pnpm@10
 
@@ -17,38 +14,19 @@ WORKDIR /app
 
 COPY . .
 
-# Avoid "/bin/bash: line 1: husky: command not found"!
-RUN grep -v 'prepare.*husky' package.json >package-tmp.json
-RUN mv package-tmp.json package.json
-
 # Give the installation two tries because of various issues.
 RUN pnpm install || true
 RUN pnpm install && pnpm run build
+RUN pnpm --filter @e-invoice-eu/server deploy --prod --legacy /out
 
 # Stage 2: Runtime stage
-FROM alpine:latest
+FROM node:20-alpine
 
 ENV NODE_ENV=production
-ENV LIBREOFFICE=libreoffice
-
-# We need the openjdk only to suppress an ugly warning from LibreOffice.
-# Also, newer versions like openjdk21-jre-headless do not shut up the
-# warning.
-RUN apk add --no-cache \
-	nodejs \
-	libreoffice \
-	openjdk8-jre \
-	ttf-freefont \
-	font-noto \
-	font-noto-cjk \
-	font-noto-emoji
 
 WORKDIR /app
 
-COPY --from=builder /app/dist /app/dist
-COPY --from=builder /app/node_modules /app/node_modules
-
-RUN echo "export LIBREOFFICE=\${LIBREOFFICE:-libreoffice}" >> /etc/profile.d/libreoffice.sh
+COPY --from=builder /out ./
 
 # Create a non-root user
 RUN addgroup -S e-invoice-eu && adduser -S e-invoice-eu -G e-invoice-eu
