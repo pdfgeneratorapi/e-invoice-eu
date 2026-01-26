@@ -116,6 +116,12 @@ export class FormatFacturXService
 		options: InvoiceServiceOptions,
 	): Promise<string | Uint8Array> {
 		Textdomain.locale = options.lang;
+		const xml = (await super.generate(invoice, options)) as string;
+
+		if (options.pdf === undefined) {
+			return xml;
+		}
+
 		this.gtx = Textdomain.getInstance('e-invoice-eu');
 		await this.gtx.resolve();
 
@@ -124,8 +130,6 @@ export class FormatFacturXService
 		const pdfDoc = await PDFDocument.load(pdf, { updateMetadata: false });
 
 		await this.attachFiles(pdfDoc, options);
-
-		const xml = (await super.generate(invoice, options)) as string;
 		await this.attachFacturX(pdfDoc, options, xml);
 		await this.createPDFA(pdfDoc, options, invoice);
 
