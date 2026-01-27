@@ -113,13 +113,13 @@ export class FormatFacturXService
 		invoice: Invoice,
 		options: InvoiceServiceOptions,
 	): Promise<string | Uint8Array> {
-		Textdomain.locale = options.lang;
 		const xml = (await super.generate(invoice, options)) as string;
 
 		if (options.pdf === undefined) {
 			return xml;
 		}
 
+		Textdomain.locale = options.lang;
 		this.gtx = Textdomain.getInstance('e-invoice-eu');
 		await this.gtx.resolve();
 

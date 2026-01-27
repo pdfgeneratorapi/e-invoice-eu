@@ -828,13 +828,13 @@ export const deliveryAddress: Transformation[] = [
 		type: 'string',
 		src: ['cbc:PostalZone'],
 		dest: ['ram:PostcodeCode'],
-		fxProfileMask: FX_MASK_BASIC_WL,
+		fxProfileMask: FX_MASK_MINIMUM,
 	},
 	{
 		type: 'string',
 		src: ['cbc:StreetName'],
 		dest: ['ram:LineOne'],
-		fxProfileMask: FX_MASK_BASIC_WL,
+		fxProfileMask: FX_MASK_MINIMUM,
 	},
 	{
 		type: 'string',
@@ -852,13 +852,13 @@ export const deliveryAddress: Transformation[] = [
 		type: 'string',
 		src: ['cbc:CityName'],
 		dest: ['ram:CityName'],
-		fxProfileMask: FX_MASK_BASIC_WL,
+		fxProfileMask: FX_MASK_MINIMUM,
 	},
 	{
 		type: 'string',
 		src: ['cac:Country', 'cbc:IdentificationCode'],
 		dest: ['ram:CountryID'],
-		fxProfileMask: FX_MASK_BASIC_WL,
+		fxProfileMask: FX_MASK_MINIMUM,
 	},
 	{
 		type: 'string',
@@ -1329,36 +1329,6 @@ export const ublInvoice: Transformation = {
 					fxProfileMask: FX_MASK_MINIMUM,
 				},
 				{
-					type: 'string',
-					src: ['cac:OrderReference', 'cbc:SalesOrderID'],
-					dest: [
-						'ram:ApplicableHeaderTradeAgreement',
-						'ram:SellerOrderReferencedDocument',
-						'ram:IssuerAssignedID',
-					],
-					fxProfileMask: FX_MASK_EN16931,
-				},
-				{
-					type: 'string',
-					src: ['cac:OrderReference', 'cbc:ID'],
-					dest: [
-						'ram:ApplicableHeaderTradeAgreement',
-						'ram:BuyerOrderReferencedDocument',
-						'ram:IssuerAssignedID',
-					],
-					fxProfileMask: FX_MASK_EXTENDED,
-				},
-				{
-					type: 'string',
-					src: ['cac:ContractDocumentReference', 'cbc:ID'],
-					dest: [
-						'ram:ApplicableHeaderTradeAgreement',
-						'ram:ContractReferencedDocument',
-						'ram:IssuerAssignedID',
-					],
-					fxProfileMask: FX_MASK_BASIC_WL,
-				},
-				{
 					type: 'object',
 					src: ['cac:AdditionalDocumentReference'],
 					dest: [
@@ -1369,75 +1339,11 @@ export const ublInvoice: Transformation = {
 					fxProfileMask: FX_MASK_MINIMUM,
 				},
 				{
-					type: 'string',
-					src: ['cac:ProjectReference', 'cbc:ID'],
-					dest: [
-						'ram:ApplicableHeaderTradeAgreement',
-						'ram:SpecifiedProcuringProject',
-						'ram:ID',
-					],
-					fxProfileMask: FX_MASK_EXTENDED,
-				},
-				// CII requires both an ID and a name but UBL only defines the
-				// ID.
-				{
-					type: 'string',
-					src: ['cac:ProjectReference', 'cbc:ID'],
-					dest: [
-						'ram:ApplicableHeaderTradeAgreement',
-						'ram:SpecifiedProcuringProject',
-						'ram:Name',
-					],
-					fxProfileMask: FX_MASK_EXTENDED,
-				},
-				{
 					type: 'object',
-					src: ['cac:Delivery'],
+					src: [],
 					dest: ['ram:ApplicableHeaderTradeDelivery'],
-					children: cacDelivery,
+					children: [],
 					fxProfileMask: FX_MASK_MINIMUM,
-				},
-				// FIXME! This is an array for CII.
-				{
-					type: 'string',
-					src: ['cac:Delivery', 'cac:DeliveryLocation', 'cbc:ID'],
-					dest: [
-						'ram:ApplicableHeaderTradeDelivery',
-						'ram:ShipToTradeParty',
-						// This will be downgraded to ram:ID in the
-						// post-processing step if no schemeID attribute is
-						// present.
-						'ram:GlobalID',
-					],
-					fxProfileMask: FX_MASK_BASIC_WL,
-				},
-				{
-					type: 'string',
-					src: ['cac:Delivery', 'cac:DeliveryLocation', 'cbc:ID@schemeID'],
-					dest: [
-						'ram:ApplicableHeaderTradeDelivery',
-						'ram:ShipToTradeParty',
-						// This will be downgraded to ram:ID in the
-						// post-processing step if no schemeID attribute is
-						// present.
-						'ram:GlobalID@schemeID',
-					],
-					fxProfileMask: FX_MASK_BASIC_WL,
-				},
-				{
-					type: 'string',
-					src: [
-						'cac:Delivery',
-						'cac:DeliveryParty',
-						'cac:PartyName',
-						'cbc:Name',
-					],
-					dest: [
-						'ram:ApplicableHeaderTradeDelivery',
-						'ram:ShipToTradeParty',
-						'ram:Name',
-					],
-					fxProfileMask: FX_MASK_BASIC_WL,
 				},
 				{
 					type: 'object',
@@ -1448,46 +1354,13 @@ export const ublInvoice: Transformation = {
 						'ram:PostalTradeAddress',
 					],
 					children: deliveryAddress,
-					fxProfileMask: FX_MASK_MINIMUM,
-				},
-				{
-					type: 'string',
-					src: ['cac:DespatchDocumentReference', 'cbc:ID'],
-					dest: [
-						'ram:ApplicableHeaderTradeDelivery',
-						'ram:DespatchAdviceReferencedDocument',
-						'ram:IssuerAssignedID',
-					],
 					fxProfileMask: FX_MASK_BASIC_WL,
 				},
 				{
-					type: 'string',
-					src: ['cac:ReceiptDocumentReference', 'cbc:ID'],
-					dest: [
-						'ram:ReceivingAdviceReferencedDocument',
-						'ram:IssuerAssignedID',
-					],
-					fxProfileMask: FX_MASK_BASIC_WL,
-				},
-				{
-					type: 'string',
-					src: ['cac:PayeeParty', 'cac:PartyIdentification', 'cbc:ID'],
-					dest: [
-						'ram:ApplicableHeaderTradeSettlement',
-						'ram:CreditorReferenceID',
-					],
-					fxProfileMask: FX_MASK_BASIC_WL,
-				},
-				{
-					type: 'string',
-					src: ['cac:PaymentMeans', 'cbc:PaymentID'],
-					dest: ['ram:ApplicableHeaderTradeSettlement', 'ram:PaymentReference'],
-					fxProfileMask: FX_MASK_BASIC_WL,
-				},
-				{
-					type: 'string',
-					src: ['cbc:TaxCurrencyCode'],
-					dest: ['ram:ApplicableHeaderTradeSettlement', 'ram:TaxCurrencyCode'],
+					type: 'object',
+					src: ['cac:Delivery'],
+					dest: ['ram:ApplicableHeaderTradeDelivery'],
+					children: cacDelivery,
 					fxProfileMask: FX_MASK_BASIC_WL,
 				},
 				{
@@ -1544,7 +1417,7 @@ export const ublInvoice: Transformation = {
 						'ram:SpecifiedTradePaymentTerms',
 						'ram:Description',
 					],
-					fxProfileMask: FX_MASK_EN16931,
+					fxProfileMask: FX_MASK_BASIC_WL,
 				},
 				{
 					type: 'string',
@@ -1569,16 +1442,6 @@ export const ublInvoice: Transformation = {
 					],
 					fxProfileMask: FX_MASK_BASIC_WL,
 				},
-				{
-					type: 'string',
-					src: ['cac:PaymentMeans', 'cac:PaymentMandate', 'cbc:ID'],
-					dest: [
-						'ram:ApplicableHeaderTradeSettlement',
-						'ram:SpecifiedTradePaymentTerms',
-						'ram:DirectDebitMandateID',
-					],
-					fxProfileMask: FX_MASK_BASIC_WL,
-				},
 				cacLegalMonetaryTotal,
 				{
 					type: 'array',
@@ -1594,26 +1457,8 @@ export const ublInvoice: Transformation = {
 							dest: ['ram:IssuerAssignedID'],
 							fxProfileMask: FX_MASK_BASIC_WL,
 						},
-						{
-							type: 'string',
-							src: ['cbc:IssueDate'],
-							dest: ['ram:FormattedIssueDateTime', 'udt:DateTimeString'],
-							fxProfileMask: FX_MASK_BASIC_WL,
-						},
-						{
-							type: 'string',
-							src: ['cbc:IssueDate', 'fixed:102'],
-							dest: ['ram:FormattedIssueDateTime', 'udt:DateTimeString@format'],
-							fxProfileMask: FX_MASK_BASIC_WL,
-						},
 					],
 					fxProfileMask: FX_MASK_MINIMUM,
-				},
-				{
-					type: 'string',
-					src: ['cbc:AccountingCost'],
-					dest: ['ram:ReceivableSpecifiedTradeAccountingAccount', 'ram:ID'],
-					fxProfileMask: FX_MASK_BASIC_WL,
 				},
 			],
 			fxProfileMask: FX_MASK_MINIMUM,
