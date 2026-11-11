@@ -1,16 +1,18 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Arguments } from 'yargs';
-
 import { coerceOptions, OptSpec } from './optspec';
 
-jest.mock('./package', () => ({
-	Package: { getName: jest.fn(() => 'test-program') },
+vi.mock('./package', () => ({
+	Package: { getName: vi.fn(() => 'test-program') },
 }));
 
 describe('coerceOptions', () => {
-	let consoleErrorSpy: jest.SpyInstance;
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
 	beforeEach(() => {
-		consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+		consoleErrorSpy = vi
+			.spyOn(console, 'error')
+			.mockImplementation(() => {});
 	});
 
 	afterEach(() => {

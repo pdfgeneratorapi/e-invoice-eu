@@ -1,7 +1,8 @@
-import { EInvoiceMIMEType } from './format.factory.service';
+import { JSONSchemaType } from 'ajv';
 import { Invoice } from '../invoice/invoice.interface';
 import { InvoiceServiceOptions } from '../invoice/invoice.service';
 import { Mapping } from '../mapping/mapping.interface';
+import { EInvoiceMIMEType } from './format.factory.service';
 
 /**
  * Interface representing an e-invoice format generation service.
@@ -60,6 +61,13 @@ export interface EInvoiceFormat {
 	fillInvoiceDefaults(invoice: Invoice): void;
 
 	/**
+	 * Perform format-specific patches.
+	 *
+	 * @param invoice - The invoice to be updated.
+	 */
+	patchInvoice(invoice: Invoice): void;
+
+	/**
 	 * Generates an invoice in the specified format.
 	 *
 	 * This function converts the given invoice data into a serialized format
@@ -75,4 +83,11 @@ export interface EInvoiceFormat {
 		invoice: Invoice,
 		options: InvoiceServiceOptions,
 	): Promise<string | Uint8Array>;
+
+	/**
+	 * Apply necessary patches to the invoice schema.
+	 *
+	 * @param schema - the original schema
+	 */
+	patchSchema(schema: JSONSchemaType<Invoice>);
 }

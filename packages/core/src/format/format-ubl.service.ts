@@ -2,14 +2,16 @@ import { Mapping } from '@e-invoice-eu/core';
 import {
 	ADDITIONALSUPPORTINGDOCUMENTS,
 	AttachedDocumentMimeCode,
+	ValueAddedTaxPointDateCode,
 } from '@e-invoice-eu/core/invoice/invoice.interface';
-
-import { FormatXMLService } from './format-xml.service';
-import { EInvoiceFormat } from './format.e-invoice-format.interface';
+import { type JSONSchemaType } from 'ajv';
 import { Invoice } from '../invoice/invoice.interface';
 import { invoiceSchema } from '../invoice/invoice.schema';
 import { InvoiceServiceOptions } from '../invoice/invoice.service';
 import { sortBySchema } from '../utils/sort-by-schema';
+import { EInvoiceFormat } from './format.e-invoice-format.interface';
+import { FormatCIIService } from './format-cii.service';
+import { FormatXMLService } from './format-xml.service';
 
 export class FormatUBLService
 	extends FormatXMLService
@@ -29,39 +31,82 @@ export class FormatUBLService
 
 	fillMappingDefaults(mapping: Mapping) {
 		if (!('cbc:CustomizationID' in mapping['ubl:Invoice'])) {
-			mapping['ubl:Invoice']['cbc:CustomizationID'] = this.customizationID;
+			mapping['ubl:Invoice']['cbc:CustomizationID'] =
+				this.customizationID;
 		}
 
 		if (!('cbc:ProfileID' in mapping['ubl:Invoice'])) {
 			mapping['ubl:Invoice']['cbc:ProfileID'] = this.profileID;
 		}
 
-		const orderReference = mapping['ubl:Invoice']['cac:OrderReference'];
-		if (
-			orderReference &&
-			'cbc:SalesOrderID' in orderReference &&
-			!('cbc:ID' in orderReference)
-		) {
-			mapping['ubl:Invoice']['cac:OrderReference']!['cbc:ID']! = 'NA';
+		if (this.syntax === 'UBL') {
+			const orderReference = mapping['ubl:Invoice']['cac:OrderReference'];
+			if (
+				orderReference &&
+				'cbc:SalesOrderID' in orderReference &&
+				!('cbc:ID' in orderReference)
+			) {
+				mapping['ubl:Invoice']['cac:OrderReference']!['cbc:ID']! = 'NA';
+			}
 		}
 	}
 
 	fillInvoiceDefaults(invoice: Invoice) {
-		if (!('cbc:customizationID' in invoice['ubl:Invoice'])) {
-			invoice['ubl:Invoice']['cbc:CustomizationID'] = this.customizationID;
+		if (!('cbc:CustomizationID' in invoice['ubl:Invoice'])) {
+			invoice['ubl:Invoice']['cbc:CustomizationID'] ??=
+				this.customizationID;
 		}
 
-		if (!('cbc:profileID' in invoice['ubl:Invoice'])) {
+		if (!('cbc:ProfileID' in invoice['ubl:Invoice'])) {
 			invoice['ubl:Invoice']['cbc:ProfileID'] = this.profileID;
 		}
 
-		const orderReference = invoice['ubl:Invoice']['cac:OrderReference'];
-		if (
-			orderReference &&
-			'cbc:SalesOrderID' in orderReference &&
-			!('cbc:ID' in orderReference)
-		) {
-			orderReference['cbc:ID'] = 'NA';
+		if (this.syntax === 'UBL') {
+			const orderReference = invoice['ubl:Invoice']['cac:OrderReference'];
+			if (
+				orderReference &&
+				'cbc:SalesOrderID' in orderReference &&
+				!('cbc:ID' in orderReference)
+			) {
+				orderReference['cbc:ID'] = 'NA';
+			}
+		}
+	}
+
+	patchSchema(schema: JSONSchemaType<Invoice>) {
+		/* The endpoint ID is mandatory for UBL.  */
+		schema.properties['ubl:Invoice'].properties[
+			'cac:AccountingCustomerParty'
+		].properties['cac:Party'].required.push('cbc:EndpointID');
+		schema.properties['ubl:Invoice'].properties[
+			'cac:AccountingSupplierParty'
+		].properties['cac:Party'].required.push('cbc:EndpointID');
+	}
+
+	public patchInvoice(invoice: Invoice) {
+		// CII and UBL use different codes for the due date description code.
+		// We allow both versions, and silently convert to the correct value
+		// for the selected format.
+		const eventTimeCodeMapping: Record<
+			ValueAddedTaxPointDateCode,
+			ValueAddedTaxPointDateCode
+		> = {
+			'3': '3',
+			'5': '3',
+			'29': '35',
+			'35': '35',
+			'72': '432',
+			'432': '432',
+		};
+
+		const code =
+			invoice['ubl:Invoice']['cac:InvoicePeriod']?.[
+				'cbc:DescriptionCode'
+			];
+		if (typeof code !== 'undefined') {
+			invoice['ubl:Invoice']['cac:InvoicePeriod']![
+				'cbc:DescriptionCode'
+			] = eventTimeCodeMapping[code] ?? code;
 		}
 	}
 
@@ -73,13 +118,15 @@ export class FormatUBLService
 		this.embedAttachments(invoice, options);
 
 		invoice = sortBySchema(invoice, invoiceSchema);
+		this.pruneCII(invoice);
 
 		const cnCodes = invoiceSchema['$defs']!.codeLists['UNCL1001-cn'].enum;
 		const code = invoice['ubl:Invoice']['cbc:InvoiceTypeCode'];
 		if (cnCodes.includes(code) && code !== '384') {
 			const creditNoteObject = {
 				CreditNote: {
-					'@xmlns': 'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2',
+					'@xmlns':
+						'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2',
 					'@xmlns:cac':
 						'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
 					'@xmlns:cbc':
@@ -88,8 +135,11 @@ export class FormatUBLService
 				},
 			};
 
-			(invoice as any)['ubl:CreditNote'] = invoice['ubl:Invoice'];
-			delete (invoice as any)['ubl:Invoice'];
+			(invoice as unknown as Record<string, unknown>)['ubl:CreditNote'] =
+				invoice['ubl:Invoice'];
+			delete (invoice as unknown as Record<string, unknown>)[
+				'ubl:Invoice'
+			];
 
 			function replaceInvoiceWithCreditNote(obj: object): object {
 				// Recursively clone and transform the object
@@ -120,11 +170,16 @@ export class FormatUBLService
 			// This field is not present in ubl:CreditNote.
 			delete creditNoteObject['CreditNote']['cbc:DueDate'];
 
-			return this.renderXML(replaceInvoiceWithCreditNote(creditNoteObject));
+			const data = replaceInvoiceWithCreditNote(creditNoteObject);
+			if (options.postProcessor) {
+				await options.postProcessor(data);
+			}
+			return this.renderXML(data);
 		} else {
 			const invoiceObject = {
 				Invoice: {
-					'@xmlns': 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
+					'@xmlns':
+						'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
 					'@xmlns:cac':
 						'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
 					'@xmlns:cbc':
@@ -133,8 +188,17 @@ export class FormatUBLService
 				},
 			};
 
+			if (options.postProcessor) {
+				await options.postProcessor(invoiceObject);
+			}
 			return this.renderXML(invoiceObject);
 		}
+	}
+
+	private pruneCII(invoice: Invoice) {
+		// If we add more elements, it is maybe better to just filter out all
+		// fields with the pseudo namespace x-cii.
+		delete invoice['ubl:Invoice']['x-cii:SubjectCode'];
 	}
 
 	private async embedPDF(invoice: Invoice, options: InvoiceServiceOptions) {
@@ -165,7 +229,8 @@ export class FormatUBLService
 		const ref: ADDITIONALSUPPORTINGDOCUMENTS = {
 			'cbc:ID': options.pdf?.id ?? invoice['ubl:Invoice']['cbc:ID'],
 			'cac:Attachment': {
-				'cbc:EmbeddedDocumentBinaryObject': this.uint8ArrayToBase64(pdf),
+				'cbc:EmbeddedDocumentBinaryObject':
+					this.uint8ArrayToBase64(pdf),
 				'cbc:EmbeddedDocumentBinaryObject@filename': filename!,
 				'cbc:EmbeddedDocumentBinaryObject@mimeCode': mimeType,
 			},

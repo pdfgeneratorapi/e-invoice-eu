@@ -54,7 +54,7 @@ Open](https://groups.oasis-open.org/home).
 OnLine)](https://peppol.org/) is an effort of the European
 Union aiming at the standardization of cross-border procurement processes.
 They have published the [Business Interoperability Specifications
-(BIS)](https://docs.peppol.eu/poacc/billing/3.0/bis/), currently version 3.0.
+(BIS)](https://docs.peppol.eu/poacc/billing/3.0/bis/), currently version 3.0.20.
 One of these specifications is that for [UBL
 Invoice](https://docs.peppol.eu/poacc/billing/3.0/syntax/ubl-invoice/tree/).
 
@@ -301,6 +301,36 @@ element, add an `@` and the attribute name:
 
 Please note that strings _must_ be used for all values, even if they are
 numbers. Check the above examples for that.
+
+## CII Extensions
+
+CII allows considerably more fields than UBL. Most of these fields are not
+part of EN16931 and therefore rarely used in the context of electronic
+invoices in the EU.
+
+Such extra fields can always be injected programmatically via a
+[post-processor](https://gflohr.github.io/e-invoice-eu/api-docs/types/InvoiceServiceOptions.html#postprocessor).
+
+Selected fields can also be injected by using the pseudo namespace 'x-cii',
+see below.
+
+### Invoice Notes
+
+In UBL, an invoice can only have one note, whereas CII allows multiple notes.
+You can therefore use multiple top-level `cbc:Note` elements. Extra notes
+are discarded for UBL.
+
+### Invoice Note Subject Code (BT-21)
+
+You can inject an invoice note subject code (BT-21) by using the special
+field `ubl:Invoice -> x-cii:SubjectCode`. The value must come from the code
+list UNCL 4451.
+
+For UBL formats, no element is rendered for BT-21.
+
+If you have multiple notes, use an array for the subject codes. For notes that
+do not have a subject code, pass an empty string. If no note has a subject
+code, you can safely omit the subject codes.
 
 ## Validation
 

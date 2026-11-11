@@ -12,16 +12,25 @@ import {
 	PDFString,
 } from '@cantoo/pdf-lib';
 import { Textdomain } from '@esgettext/runtime';
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from 'vitest';
 
 import { Invoice, InvoiceServiceOptions } from '../invoice';
+import { Package } from '../package';
 import { FormatCIIService, FULL_CII } from './format-cii.service';
 import { FormatFacturXService } from './format-factur-x.service';
-import { Package } from '../package';
 
 const mockLogger = {
-	log: jest.fn(),
-	warn: jest.fn(),
-	error: jest.fn(),
+	log: vi.fn(),
+	warn: vi.fn(),
+	error: vi.fn(),
 };
 
 const mockInvoice = {
@@ -31,7 +40,7 @@ const mockInvoice = {
 		'cac:AccountingSupplierParty': {
 			'cac:Party': {
 				'cac:PartyLegalEntity': {
-					'cbc:RegistrationName': 'Acme Ltd.',
+					'cbc:RegistrationName': 'Äcme Ltd.',
 				},
 			},
 		},
@@ -78,7 +87,9 @@ async function createTestPDF(): Promise<PDFDocument> {
 
 	const linkAnnotationRef = pdfDoc.context.register(linkAnnotation);
 
-	let annotations = page.node.get(PDFName.of('Annots')) as PDFArray | undefined;
+	let annotations = page.node.get(PDFName.of('Annots')) as
+		| PDFArray
+		| undefined;
 	if (!annotations) {
 		annotations = pdfDoc.context.obj([]) as PDFArray;
 		page.node.set(PDFName.of('Annots'), annotations);
@@ -167,16 +178,16 @@ describe('FormatFacturXService', () => {
 	let service: FormatFacturXService;
 	let mockOptions: InvoiceServiceOptions;
 
-	beforeAll(() => {
-		jest.spyOn(Package, 'getVersion').mockReturnValue('VERSION');
+	beforeEach(() => {
+		vi.spyOn(Package, 'getVersion').mockReturnValue('VERSION');
 	});
 
 	beforeEach(async () => {
 		service = new FormatFacturXService(mockLogger);
 
-		jest
-			.spyOn(FormatCIIService.prototype, 'generate')
-			.mockResolvedValue('<invoice></invoice>');
+		vi.spyOn(FormatCIIService.prototype, 'generate').mockResolvedValue(
+			'<invoice></invoice>',
+		);
 
 		const pdfDoc = await createTestPDF();
 
@@ -202,9 +213,9 @@ describe('FormatFacturXService', () => {
 
 		it('should throw an exception for unknown formats', async () => {
 			mockOptions.format = 'ZirkusFErD-Extended';
-			await expect(service.generate(mockInvoice, mockOptions)).rejects.toThrow(
-				"unknown Factur-X format 'ZirkusFErD-Extended'",
-			);
+			await expect(
+				service.generate(mockInvoice, mockOptions),
+			).rejects.toThrow("unknown Factur-X format 'ZirkusFErD-Extended'");
 		});
 	});
 
@@ -214,7 +225,8 @@ describe('FormatFacturXService', () => {
 
 			const locale = mockOptions.lang.replace(
 				/^([a-z]{2})-([a-z]{2})$/i,
-				(_, lang, country) => `${lang.toLowerCase()}-${country.toUpperCase()}`,
+				(_, lang, country) =>
+					`${lang.toLowerCase()}-${country.toUpperCase()}`,
 			);
 			expect(Textdomain.locale).toBe(locale);
 		});
@@ -224,7 +236,7 @@ describe('FormatFacturXService', () => {
 		let originalGetTimezoneOffset: () => number;
 
 		beforeAll(() => {
-			jest.useFakeTimers().setSystemTime(new Date('2025-04-01T12:00:00Z'));
+			vi.useFakeTimers().setSystemTime(new Date('2025-04-01T12:00:00Z'));
 
 			// useFakeTimers() does not honour the TZ environment variable.
 			// We have to monkey patch getTimezoneOffset() instead.
@@ -234,7 +246,7 @@ describe('FormatFacturXService', () => {
 
 		afterAll(() => {
 			Date.prototype.getTimezoneOffset = originalGetTimezoneOffset;
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 
 		it('should add XMP metadata for Factur-X-Minimum', async () => {
@@ -277,6 +289,21 @@ describe('FormatFacturXService', () => {
 
 		it('should add XMP metadata for Factur-X-XRechnung', async () => {
 			mockOptions.format = 'Factur-X-XRechnung';
+
+			const pdfBytes = await service.generate(mockInvoice, mockOptions);
+
+			expect(await extractXMPMetadata(pdfBytes)).toMatchSnapshot();
+		});
+
+		it('should override invoice metadata', async () => {
+			mockOptions.customMetadata = {
+				author: 'Homer Simpson',
+				creator: 'Mr. Burns Enterprises',
+				keywords: ['unpaid-tab', 'moes-tavern', 'doh'],
+				producer: 'Springfield Nuclear Power Plant',
+				subject: 'Overdue Payment for 1,000 Contaminated Donuts',
+				title: 'INVOICE #DOH-80085 - Sector 7-G Catering Services',
+			};
 
 			const pdfBytes = await service.generate(mockInvoice, mockOptions);
 
@@ -422,10 +449,10 @@ describe('FormatFacturXService', () => {
 		});
 
 		it('should throw an exception if attaching the Factur-X XML fails', async () => {
-			const attachMock = jest
+			const attachMock = vi
 				.spyOn(PDFDocument.prototype, 'attach')
 				.mockRejectedValue('no string attached');
-			const consoleMock = jest
+			const consoleMock = vi
 				.spyOn(globalThis.console, 'error')
 				.mockImplementation(() => {});
 
@@ -492,7 +519,9 @@ describe('FormatFacturXService', () => {
 			expect(hoursheetAttachments[0].afRelationship).toBe(
 				AFRelationship.Supplement,
 			);
-			expect(hoursheetAttachments[0].description).toBe('Supplementary file');
+			expect(hoursheetAttachments[0].description).toBe(
+				'Supplementary file',
+			);
 
 			const catalogueAttachments = attachments.filter(
 				a => a.name === 'catalogue.pdf',
@@ -512,9 +541,9 @@ describe('FormatFacturXService', () => {
 	describe('crypto API', () => {
 		it('should return window.crypto.subtle when running in browser', async () => {
 			const subtleMock = {
-				digest: jest.fn(),
+				digest: vi.fn(),
 			} as unknown as SubtleCrypto;
-			(globalThis as any).window = {
+			(globalThis as unknown as Record<string, unknown>).window = {
 				crypto: { subtle: subtleMock },
 			};
 
@@ -525,16 +554,17 @@ describe('FormatFacturXService', () => {
 				expect.anything(),
 			);
 
-			delete (globalThis as any).window;
+			delete (globalThis as unknown as Record<string, unknown>).window;
 		});
 
 		it('should return globalThis.crypto.subtle in Node with webcrypto', async () => {
 			const subtleMock = {
-				digest: jest.fn(),
+				digest: vi.fn(),
 			} as unknown as SubtleCrypto;
 
-			const savedCrypto = (globalThis as any).crypto;
-			(globalThis as any).crypto = { subtle: subtleMock };
+			vi.spyOn(globalThis.crypto, 'subtle', 'get').mockReturnValue(
+				subtleMock,
+			);
 
 			await service.generate(mockInvoice, mockOptions);
 
@@ -543,54 +573,97 @@ describe('FormatFacturXService', () => {
 				'SHA-512',
 				expect.anything(),
 			);
-
-			(globalThis as any).crypto = savedCrypto;
 		});
 
 		it('should use webcrypto.subtle where applicable', () => {
-			const savedCrypto = (globalThis as any).crypto;
-			delete (globalThis as any).crypto;
+			const savedCrypto = (
+				globalThis as unknown as Record<string, unknown>
+			).crypto;
+			delete (globalThis as unknown as Record<string, unknown>).crypto;
 
-			const customRequire = jest.fn().mockImplementation((module: string) => {
-				if (module === 'crypto') {
-					return { webcrypto: { subtle: 'catchme' } };
-				}
+			const customRequire = vi
+				.fn()
+				.mockImplementation((module: string) => {
+					if (module === 'crypto') {
+						return { webcrypto: { subtle: 'catchme' } };
+					}
 
-				throw new Error(`Module ${module} not found`);
-			});
+					throw new Error(`Module ${module} not found`);
+				});
 
 			expect(service['getCrypto'](customRequire)).toBe('catchme');
-			(globalThis as any).crypto = savedCrypto;
+			(globalThis as unknown as Record<string, unknown>).crypto =
+				savedCrypto;
 		});
 
 		it('should throw if webcrypto.subtle is not available in an environment', () => {
-			const savedCrypto = (globalThis as any).crypto;
-			delete (globalThis as any).crypto;
+			const savedCrypto = (
+				globalThis as unknown as Record<string, unknown>
+			).crypto;
+			delete (globalThis as unknown as Record<string, unknown>).crypto;
 
-			const customRequire = jest.fn().mockImplementation((module: string) => {
-				throw new Error(`Module ${module} not found`);
-			});
+			const customRequire = vi
+				.fn()
+				.mockImplementation((module: string) => {
+					throw new Error(`Module ${module} not found`);
+				});
 
 			try {
 				expect(() => service['getCrypto'](customRequire)).toThrow(
 					'Web Crypto API is not available in this environment',
 				);
 			} finally {
-				(globalThis as any).crypto = savedCrypto;
+				(globalThis as unknown as Record<string, unknown>).crypto =
+					savedCrypto;
 			}
 		});
 
 		it('should throw if no crypto API is available', () => {
-			const savedCrypto = (globalThis as any).crypto;
-			delete (globalThis as any).crypto;
+			const savedCrypto = (
+				globalThis as unknown as Record<string, unknown>
+			).crypto;
+			delete (globalThis as unknown as Record<string, unknown>).crypto;
 
 			try {
 				expect(() => service['getCrypto']()).toThrow(
 					'Web Crypto API is not available',
 				);
 			} finally {
-				(globalThis as any).crypto = savedCrypto;
+				(globalThis as unknown as Record<string, unknown>).crypto =
+					savedCrypto;
 			}
+		});
+	});
+
+	describe('PDF/A compliance', () => {
+		it('should set OutputIntent with N = 3 for sRGB profile', async () => {
+			const pdfBytes = await service.generate(mockInvoice, mockOptions);
+			const pdfDoc = await PDFDocument.load(pdfBytes);
+
+			const outputIntents = pdfDoc.catalog.lookup(
+				PDFName.of('OutputIntents'),
+				PDFArray,
+			);
+			expect(outputIntents).toBeDefined();
+			expect(outputIntents.size()).toBeGreaterThan(0);
+
+			const outputIntent = outputIntents.lookup(0, PDFDict);
+			expect(outputIntent).toBeDefined();
+			expect(outputIntent.lookup(PDFName.of('Type'))).toEqual(
+				PDFName.of('OutputIntent'),
+			);
+			expect(outputIntent.lookup(PDFName.of('S'))).toEqual(
+				PDFName.of('GTS_PDFA1'),
+			);
+
+			const profileStream = outputIntent.lookup(
+				PDFName.of('DestOutputProfile'),
+				PDFStream,
+			);
+			expect(profileStream).toBeDefined();
+
+			const nValue = profileStream.dict.lookup(PDFName.of('N'));
+			expect(nValue).toEqual(PDFNumber.of(3));
 		});
 	});
 });

@@ -1,22 +1,22 @@
 import { ErrorObject, ValidateFunction, ValidationError } from 'ajv';
-
-import { ValidationService } from './validation.service';
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { Logger } from '../logger.interface';
+import { ValidationService } from './validation.service';
 
 describe('ValidationService', () => {
 	let logger: Logger;
 	let service: ValidationService;
-	let mockValidate: ValidateFunction;
+	let mockValidate: ValidateFunction & Mock;
 
 	beforeEach(async () => {
 		logger = {
-			error: jest.fn(),
+			error: vi.fn(),
 		} as unknown as Logger;
 
 		service = new ValidationService(logger);
 
 		// Mock the validate function
-		mockValidate = jest.fn() as unknown as ValidateFunction;
+		mockValidate = vi.fn() as unknown as ValidateFunction & Mock;
 	});
 
 	it('should be defined', () => {
@@ -27,7 +27,7 @@ describe('ValidationService', () => {
 		const validData = { name: 'John', age: 30 };
 
 		// Simulate successful validation
-		(mockValidate as unknown as jest.Mock).mockReturnValue(true);
+		mockValidate.mockReturnValue(true);
 
 		expect(service.validate('test', mockValidate, validData)).toEqual(
 			validData,
@@ -46,12 +46,12 @@ describe('ValidationService', () => {
 				schemaPath: '.required',
 			} as unknown as ErrorObject,
 		];
-		(mockValidate as unknown as jest.Mock).mockReturnValue(false);
+		mockValidate.mockReturnValue(false);
 		mockValidate.errors = errors;
 
-		expect(() => service.validate('test', mockValidate, invalidData)).toThrow(
-			ValidationError,
-		);
+		expect(() =>
+			service.validate('test', mockValidate, invalidData),
+		).toThrow(ValidationError);
 
 		try {
 			service.validate('test', mockValidate, invalidData);

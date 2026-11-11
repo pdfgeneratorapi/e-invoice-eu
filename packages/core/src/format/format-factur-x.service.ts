@@ -12,11 +12,10 @@ import { EInvoiceMIMEType, Invoice } from '@e-invoice-eu/core';
 import { Textdomain } from '@esgettext/runtime';
 import { create } from 'xmlbuilder2';
 import { XMLBuilder } from 'xmlbuilder2/lib/interfaces';
-
-import { FormatCIIService, FULL_CII, FXProfile } from './format-cii.service';
-import { EInvoiceFormat } from './format.e-invoice-format.interface';
 import { FileInfo, InvoiceServiceOptions } from '../invoice/invoice.service';
 import { Package as pkg } from '../package';
+import { EInvoiceFormat } from './format.e-invoice-format.interface';
+import { FormatCIIService, FULL_CII, FXProfile } from './format-cii.service';
 
 type FacturXConformanceLevel =
 	| 'MINIMUM'
@@ -36,6 +35,9 @@ type InvoiceMeta = {
 	creator: string;
 	producer: string;
 	subject: string;
+	author: string;
+	keywords: string[];
+	title: string;
 };
 
 const colourProfile = `
@@ -99,7 +101,7 @@ export class FormatFacturXService
 	extends FormatCIIService
 	implements EInvoiceFormat
 {
-	private gtx: Textdomain;
+	private gtx!: Textdomain;
 
 	get mimeType(): EInvoiceMIMEType {
 		return 'application/pdf';
@@ -113,13 +115,13 @@ export class FormatFacturXService
 		invoice: Invoice,
 		options: InvoiceServiceOptions,
 	): Promise<string | Uint8Array> {
+		Textdomain.locale = options.lang;
 		const xml = (await super.generate(invoice, options)) as string;
 
 		if (options.pdf === undefined) {
 			return xml;
 		}
 
-		Textdomain.locale = options.lang;
 		this.gtx = Textdomain.getInstance('e-invoice-eu');
 		await this.gtx.resolve();
 
@@ -139,7 +141,11 @@ export class FormatFacturXService
 		options: InvoiceServiceOptions,
 	) {
 		for (const attachment of options.attachments || []) {
-			await this.attachFile(pdfDoc, attachment, AFRelationship.Supplement);
+			await this.attachFile(
+				pdfDoc,
+				attachment,
+				AFRelationship.Supplement,
+			);
 		}
 	}
 
@@ -157,33 +163,6 @@ export class FormatFacturXService
 			modificationDate: now,
 			afRelationship: relationship,
 		});
-
-		const attachments = pdfDoc.getAttachments();
-		for (let i = 0; i < attachments.length; ++i) {
-			const attachment = attachments[i];
-		}
-
-		/* 		// Some validators insist on having the attachment listed in the
-		// File Specification Dictionary.
-		const context = pdfDoc.context;
-		const fileSpecDict = context.obj({
-			Type: 'Filespec',
-			F: pdfDoc.context.flateStream(fileInfo.filename),
-			UF: pdfDoc.context.flateStream(fileInfo.filename),
-			Desc: fileInfo.description ?? 'Supplementary file',
-			AFRelationship: relationship,
-			EF: context.obj({ F: embeddedFileRef }),
-		});
-
-		// Manually add to the EmbeddedFiles name tree:
-		const names = pdfDoc.catalog.lookup(PDFName.of('Names'), PDFDict) ??
-					context.obj({});
-		pdfDoc.catalog.set(PDFName.of('Names'), names);
-
-		names.set(PDFName.of('EmbeddedFiles'), context.obj({
-			Names: [ fileInfo.filename, fileSpecDict ]
-		}));
- */
 	}
 
 	private async createPDFA(
@@ -192,8 +171,11 @@ export class FormatFacturXService
 		invoice: Invoice,
 	): Promise<void> {
 		let xmp = create();
-		const bom = '\u00EF\u00BB\u00BF';
-		xmp = xmp.ins('xpacket', `begin="${bom}" id="W5M0MpCehiHzreSzNTczkc9d"`);
+		const bom = '\uFEFF';
+		xmp = xmp.ins(
+			'xpacket',
+			`begin="${bom}" id="W5M0MpCehiHzreSzNTczkc9d"`,
+		);
 
 		let conformanceLevel: FacturXConformanceLevel;
 		let version: string;
@@ -249,28 +231,42 @@ export class FormatFacturXService
 				invoiceCreator,
 			},
 		);
-		const invoiceMeta = {
+		const invoiceMeta: InvoiceMeta = {
 			conformanceLevel,
 			version,
 			filename,
-			creator: invoiceCreator,
+			author:
+				options.customMetadata?.author ??
+				options.customMetadata?.creator ??
+				invoiceCreator,
+			creator: options.customMetadata?.creator ?? invoiceCreator,
 			now: this.formatDateWithOffset(now),
-			producer: 'e-invoice-eu - https://gflohr.github.io/e-invoice-eu',
-			subject: invoiceSubject,
+			producer:
+				options.customMetadata?.producer ??
+				'e-invoice-eu - https://gflohr.github.io/e-invoice-eu',
+			subject: options.customMetadata?.subject ?? invoiceSubject,
+			title:
+				options.customMetadata?.title ??
+				`${invoiceCreator}: Invoice ${invoiceNumber}`,
+			keywords: options.customMetadata?.keywords ?? [
+				this.gtx._('Invoice'),
+				'Factur-X',
+				'ZUGFeRD',
+			],
 		};
 
 		this.addXmpMeta(xmp, invoiceMeta);
 		xmp = xmp.ins('xpacket', 'end="w"');
 
-		pdfDoc.setAuthor(invoiceMeta.creator);
+		pdfDoc.setAuthor(invoiceMeta.author);
 		pdfDoc.setCreationDate(now);
-		pdfDoc.setCreator(invoiceMeta.producer);
-		pdfDoc.setKeywords([this.gtx._('Invoice'), 'Factur-X', 'ZUGFeRD']);
+		pdfDoc.setCreator(invoiceMeta.creator);
+		pdfDoc.setKeywords(invoiceMeta.keywords);
 		pdfDoc.setLanguage(options.lang);
 		pdfDoc.setModificationDate(now);
 		pdfDoc.setProducer(invoiceMeta.producer);
-		pdfDoc.setSubject(invoiceSubject);
-		pdfDoc.setTitle(`${invoiceCreator}: Invoice ${invoiceNumber}`);
+		pdfDoc.setSubject(invoiceMeta.subject);
+		pdfDoc.setTitle(invoiceMeta.title);
 
 		await this.setTrailerInfoID(pdfDoc, invoiceMeta);
 		this.setOutputIntent(pdfDoc);
@@ -309,18 +305,43 @@ export class FormatFacturXService
 			if (annotations instanceof PDFArray) {
 				for (let i = 0; i < annotations.size(); ++i) {
 					const annotationRef = annotations.get(i);
-					const annotation = page.node.context.lookup(annotationRef) as PDFDict;
+					const annotation = page.node.context.lookup(
+						annotationRef,
+					) as PDFDict;
 
 					const subtype = annotation.get(PDFName.of('Subtype'));
 					if (subtype === PDFName.of('Link')) {
 						const flagsObj = annotation.get(PDFName.of('F'));
 						const flags =
-							flagsObj instanceof PDFNumber ? flagsObj.asNumber() : 0;
+							flagsObj instanceof PDFNumber
+								? flagsObj.asNumber()
+								: 0;
 
-						annotation.set(PDFName.of('F'), PDFNumber.of(flags | 4));
+						annotation.set(
+							PDFName.of('F'),
+							PDFNumber.of(flags | 4),
+						);
 					}
 				}
 			}
+		}
+	}
+
+	private getIccComponentCount(profile: Uint8Array): number {
+		if (profile.length < 20) return 3; // Fallback default
+
+		// Bytes 16–19 represent the color space signature in the ICC header
+		const colorSpace = String.fromCharCode(...profile.slice(16, 20)).trim();
+
+		switch (colorSpace) {
+			case 'RGB':
+				return 3;
+			case 'CMYK':
+				return 4;
+			case 'GRAY':
+				return 1;
+			default:
+				return 3;
 		}
 	}
 
@@ -328,6 +349,7 @@ export class FormatFacturXService
 		const profile = this.base64ToUint8Array(colourProfile);
 		const profileStream = pdfDoc.context.stream(profile, {
 			Length: profile.length,
+			N: this.getIccComponentCount(profile),
 		});
 		const profileStreamRef = pdfDoc.context.register(profileStream);
 
@@ -371,7 +393,10 @@ export class FormatFacturXService
 			.join('');
 		const permanent = PDFHexString.of(hashHex);
 		const changing = permanent;
-		pdfDoc.context.trailerInfo.ID = pdfDoc.context.obj([permanent, changing]);
+		pdfDoc.context.trailerInfo.ID = pdfDoc.context.obj([
+			permanent,
+			changing,
+		]);
 	}
 
 	private addXmpMeta(node: XMLBuilder, invoiceMeta: InvoiceMeta) {
@@ -394,11 +419,10 @@ export class FormatFacturXService
 	}
 
 	private addPdfAidDescription(node: XMLBuilder) {
-		node
-			.ele('rdf:Description', {
-				'xmlns:pdfaid': 'http://www.aiim.org/pdfa/ns/id/',
-				'rdf:about': '',
-			})
+		node.ele('rdf:Description', {
+			'xmlns:pdfaid': 'http://www.aiim.org/pdfa/ns/id/',
+			'rdf:about': '',
+		})
 			.ele('pdfaid:part')
 			.txt('3')
 			.up()
@@ -407,11 +431,10 @@ export class FormatFacturXService
 	}
 
 	private addPdfPurl(node: XMLBuilder, invoiceMeta: InvoiceMeta) {
-		node
-			.ele('rdf:Description', {
-				'xmlns:dc': 'http://purl.org/dc/elements/1.1/',
-				'rdf:about': '',
-			})
+		node.ele('rdf:Description', {
+			'xmlns:dc': 'http://purl.org/dc/elements/1.1/',
+			'rdf:about': '',
+		})
 			.ele('dc:format')
 			.txt('application/pdf')
 			.up()
@@ -443,24 +466,22 @@ export class FormatFacturXService
 	}
 
 	private addProducer(node: XMLBuilder, invoiceMeta: InvoiceMeta) {
-		node
-			.ele('rdf:Description', {
-				'xmlns:pdf': 'http://ns.adobe.com/pdf/1.3/',
-				'rdf:about': '',
-			})
+		node.ele('rdf:Description', {
+			'xmlns:pdf': 'http://ns.adobe.com/pdf/1.3/',
+			'rdf:about': '',
+		})
 			.ele('pdf:Producer')
-			.txt(invoiceMeta.creator)
+			.txt(invoiceMeta.producer)
 			.up()
 			.ele('pdf:PDFVersion')
 			.txt('1.7');
 	}
 
 	private addXap(node: XMLBuilder, invoiceMeta: InvoiceMeta) {
-		node
-			.ele('rdf:Description', {
-				'xmlns:xmp': 'http://ns.adobe.com/xap/1.0/',
-				'rdf:about': '',
-			})
+		node.ele('rdf:Description', {
+			'xmlns:xmp': 'http://ns.adobe.com/xap/1.0/',
+			'rdf:about': '',
+		})
 			.ele('xmp:CreatorTool')
 			.txt(
 				`${pkg.getName()} ${pkg.getVersion()} git+https://github.com/gflohr/e-invoice-eu`,
@@ -478,13 +499,12 @@ export class FormatFacturXService
 	}
 
 	private addPdfAExtension(node: XMLBuilder) {
-		node
-			.ele('rdf:Description', {
-				'xmlns:pdfaExtension': 'http://www.aiim.org/pdfa/ns/extension/',
-				'xmlns:pdfaSchema': 'http://www.aiim.org/pdfa/ns/schema#',
-				'xmlns:pdfaProperty': 'http://www.aiim.org/pdfa/ns/property#',
-				'rdf:about': '',
-			})
+		node.ele('rdf:Description', {
+			'xmlns:pdfaExtension': 'http://www.aiim.org/pdfa/ns/extension/',
+			'xmlns:pdfaSchema': 'http://www.aiim.org/pdfa/ns/schema#',
+			'xmlns:pdfaProperty': 'http://www.aiim.org/pdfa/ns/property#',
+			'rdf:about': '',
+		})
 			.ele('pdfaExtension:schemas')
 			.ele('rdf:Bag')
 			.ele('rdf:li', { 'rdf:parseType': 'Resource' })
@@ -560,17 +580,20 @@ export class FormatFacturXService
 			.txt('external')
 			.up()
 			.ele('pdfaProperty:description')
-			.txt(this.gtx._('The conformance level of the embedded XML document'))
+			.txt(
+				this.gtx._(
+					'The conformance level of the embedded XML document',
+				),
+			)
 			.up()
 			.up();
 	}
 
 	private addFacturXStuff(node: XMLBuilder, invoiceMeta: InvoiceMeta) {
-		node
-			.ele('rdf:Description', {
-				'xmlns:fx': 'urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#',
-				'rdf:about': '',
-			})
+		node.ele('rdf:Description', {
+			'xmlns:fx': 'urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#',
+			'rdf:about': '',
+		})
 			.ele('fx:DocumentType')
 			.txt('INVOICE')
 			.up()
@@ -600,14 +623,13 @@ export class FormatFacturXService
 	}
 
 	private addMetadata(pdfDoc: PDFDocument, xmp: string) {
-		const metadataStream = pdfDoc.context.stream(xmp, {
+		const xmpBytes = new TextEncoder().encode(xmp);
+		const metadataStream = pdfDoc.context.stream(xmpBytes, {
 			Type: 'Metadata',
 			Subtype: 'XML',
-			Length: xmp.length,
+			Length: xmpBytes.length,
 		});
-
 		const metadataStreamRef = pdfDoc.context.register(metadataStream);
-
 		pdfDoc.catalog.set(PDFName.of('Metadata'), metadataStreamRef);
 	}
 
@@ -636,11 +658,13 @@ export class FormatFacturXService
 			);
 		} catch (error) {
 			console.error(`Error attaching Factur-X XML file to PDF: ${error}`);
-			throw new Error(`Error attaching Factur-X XML file to PDF: ${error}`);
+			throw new Error(
+				`Error attaching Factur-X XML file to PDF: ${error}`,
+			);
 		}
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+	// biome-ignore lint/complexity/noBannedTypes: todo
 	private getCrypto(customRequire?: Function): SubtleCrypto {
 		if (typeof window !== 'undefined' && window.crypto?.subtle) {
 			return window.crypto.subtle;
@@ -653,7 +677,9 @@ export class FormatFacturXService
 				const { webcrypto } = customRequire('crypto');
 				return webcrypto.subtle;
 			} catch {
-				throw new Error('Web Crypto API is not available in this environment.');
+				throw new Error(
+					'Web Crypto API is not available in this environment.',
+				);
 			}
 		}
 		throw new Error('Web Crypto API is not available.');

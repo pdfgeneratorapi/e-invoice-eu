@@ -19,17 +19,15 @@ delete inputSchema.$id;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const configPath = path.resolve(__dirname, '../../../.prettierrc');
-const style = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-
-const options = { style };
-
-compile(inputSchema, 'Invoice', options).then(ts => {
+compile(inputSchema, 'Invoice', {}).then(ts => {
 	const typedoc = `
 /**
  * This is a TypeScript interface for the JSON Schema definition
  * (https://json-schema.org/) for the corresponding data type.
  */
 `;
-	fs.writeFileSync(interfaceFilename, ts.replace(/^export interface/m, typedoc + 'export interface'));
+	fs.writeFileSync(
+		interfaceFilename,
+		ts.replace(/^export interface/m, typedoc + 'export interface'),
+	);
 });

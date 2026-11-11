@@ -1,14 +1,20 @@
 import { Logger } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-
-import { FormatFactoryService } from './format.factory.service';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { AppConfigService } from '../app-config/app-config.service';
+import { FormatFactoryService } from './format.factory.service';
 
 describe('XRECHNUNG-UBL', () => {
 	let service: FormatFactoryService;
 
 	beforeEach(async () => {
 		const module: TestingModule = await Test.createTestingModule({
+			imports: [
+				ConfigModule.forRoot({
+					isGlobal: true,
+				}),
+			],
 			providers: [
 				AppConfigService,
 				{
@@ -46,7 +52,10 @@ describe('XRECHNUNG-UBL', () => {
 
 	it('should create an XRECHNUNG-UBL format service', () => {
 		expect(
-			service.createFormatService('XRECHNUNG-UBL', {} as unknown as Logger),
+			service.createFormatService(
+				'XRECHNUNG-UBL',
+				{} as unknown as Logger,
+			),
 		).toBeDefined();
 	});
 

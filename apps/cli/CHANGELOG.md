@@ -1,0 +1,227 @@
+# @e-invoice-eu/cli
+
+## 3.4.3
+
+### Patch Changes
+
+- 5d8215e: All dependencies upgraded to latest.
+- Updated dependencies [c1cec97]
+- Updated dependencies [271d4ab]
+- Updated dependencies [da22f17]
+- Updated dependencies [5d8215e]
+  - @e-invoice-eu/core@3.4.3
+
+## 3.4.2
+
+### Patch Changes
+
+- 831f2b9: Upgrade all dependencies to latest.
+- Updated dependencies [5a9f555]
+- Updated dependencies [831f2b9]
+- Updated dependencies [e7e6c90]
+  - @e-invoice-eu/core@3.4.2
+
+## 3.4.1
+
+### Patch Changes
+
+- 5077836: Upgrade all dependencies to latest.
+  
+  Exception: TypeScript. TypeScript 7 is still incomptabile with NestJS.
+- Updated dependencies [443dfaa]
+- Updated dependencies [5077836]
+  - @e-invoice-eu/core@3.4.1
+
+## 3.4.0
+
+### Patch Changes
+
+- 4dbbbfd: Upgrade all dependencies to latest.
+  
+  Exceptions: TypeScript because of NodeJS and pnpm because of pipeline
+  failures for Windows.
+- Updated dependencies [4dbbbfd]
+- Updated dependencies [368ee30]
+  - @e-invoice-eu/core@3.4.0
+
+## 3.3.3
+
+### Patch Changes
+
+- @e-invoice-eu/core@3.3.3
+
+## 3.3.2
+
+### Patch Changes
+
+- 51ececb: The problem with the Docker publishing is hopefully fixed.
+- 51ececb: All direct dependencies have been updated to latest.
+- cb9f239: upgrade changesets
+- Updated dependencies [51ececb]
+- Updated dependencies [51ececb]
+- Updated dependencies [cb9f239]
+  - @e-invoice-eu/core@3.3.2
+
+## 3.3.1
+
+### Patch Changes
+
+- a9aa0e4: escape at-sign in branch trigger
+- 3c6eefa: upgrade all dependencies to latest
+  
+  Exception: TypeScript because of NestJS.
+- Updated dependencies [a9aa0e4]
+- Updated dependencies [3c6eefa]
+  - @e-invoice-eu/core@3.3.1
+
+## 3.3.0
+
+### Minor Changes
+
+- 77fffdf: Map creditor reference ID correctly.
+  
+  A supplier or payee party ID with `@schemeID=SEPA` is now mapped to the CII
+  creditor reference ID (BT-90). The payee party ID has precedence over the
+  supplier party ID. If multiple conflicting supplier party `@schemeID=SEPA` are
+  specified, the first one takes precedence.
+
+### Patch Changes
+
+- Updated dependencies [77fffdf]
+  - @e-invoice-eu/core@3.3.0
+
+## 3.2.1
+
+### Patch Changes
+
+- 8074c15: Upgrade all dependencies.
+  
+  Exception: TypeScript. NestJS still does not work with TypeScript 7.
+  Upgrading the TypeScript versions in the other workspaces fails, see
+  https://github.com/nestjs/nest-cli/issues/3549.
+- Updated dependencies [7c0cb64]
+- Updated dependencies [8074c15]
+  - @e-invoice-eu/core@3.2.1
+
+## 3.2.0
+
+### Patch Changes
+
+- e77faa0: Use cbc:CompanyLegalForm instead of cbc:LegalForm (see #566).
+- 5f24875: Upgrade all dependencies to latest.
+
+  Exception: TypeScript is not upgrade to version 7, because neither NestJS nor
+  Rollup support TypeScript 7 for the time being. But since TypeScript is a
+  devDependency, this does not affect any users of the software.
+
+- e08d51c: Preserve correct ID, when downgrading ram:GlobalID to ram:ID (#567).
+- afdc2fd: Report the correct cli version when installed locally.
+- Updated dependencies [938ab61]
+- Updated dependencies [e77faa0]
+- Updated dependencies [1566b64]
+- Updated dependencies [5f24875]
+- Updated dependencies [e08d51c]
+- Updated dependencies [1566b64]
+  - @e-invoice-eu/core@3.2.0
+
+## 3.1.1
+
+### Patch Changes
+
+- d8809ce: Fix homepage URLs.
+- cc349ba: Make Base64 padding optional.
+- Updated dependencies [d8809ce]
+- Updated dependencies [cc349ba]
+  - @e-invoice-eu/core@3.1.1
+
+## 3.1.0
+
+### Patch Changes
+
+- Updated dependencies [f88cd94]
+  - @e-invoice-eu/core@3.1.0
+
+## 3.0.3
+
+### Patch Changes
+
+- Updated dependencies [375b34a]
+- Updated dependencies [109fbbf]
+- Updated dependencies [e90c3e6]
+  - @e-invoice-eu/core@3.0.3
+
+## 3.0.2
+
+### Patch Changes
+
+- Updated dependencies [6a4ddf6]
+  - @e-invoice-eu/core@3.0.2
+
+## 3.0.1
+
+### Patch Changes
+
+- Updated dependencies [e80b0ca]
+  - @e-invoice-eu/core@3.0.1
+
+## 3.0.0
+
+### Patch Changes
+
+- 0f849c6: Factur-X conformance level for price elements fixed
+- Updated dependencies [0f849c6]
+- Updated dependencies [2eb5907]
+- Updated dependencies [71c08ac]
+- Updated dependencies [0831806]
+  - @e-invoice-eu/core@3.0.0
+
+## 2.3.4
+
+### Patch Changes
+
+- automatic dockerhub publish and bugfixes
+- Updated dependencies
+  - @e-invoice-eu/core@2.3.4
+
+## 2.3.3
+
+### Patch Changes
+
+- upgrade dependencies and fix CVEs
+- Updated dependencies
+  - @e-invoice-eu/core@2.3.3
+
+## 2.3.2
+
+### Patch Changes
+
+- make customization id overridable
+- Updated dependencies
+  - @e-invoice-eu/core@2.3.2
+
+## 2.3.1
+
+### Patch Changes
+
+- fix CII output
+- Updated dependencies
+  - @e-invoice-eu/core@2.3.1
+
+## 2.3.1
+
+### Patch Changes
+
+- fix CII output
+- Updated dependencies
+  - @e-invoice-eu/core@2.3.1
+
+## 2.4.0
+
+### Minor Changes
+
+- fix CII output
+
+### Patch Changes
+
+- Updated dependencies
+  - @e-invoice-eu/core@2.4.0

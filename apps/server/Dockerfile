@@ -1,36 +1,64 @@
-# Stage 1: Build stage
-FROM node:20-alpine AS builder
+# Stage 1: Build
+FROM node:26-alpine AS builder
 
-ENV NODE_ENV=production
-
-RUN apk add --no-cache \
-	bash \
-	curl \
-    git
-
-RUN npm install -g pnpm@10
+ENV CI=true
 
 WORKDIR /app
 
-COPY . .
+RUN npm install -g pnpm@12.15.0
 
-# Give the installation two tries because of various issues.
-RUN pnpm install || true
-RUN pnpm install && pnpm run build
-RUN pnpm --filter @e-invoice-eu/server deploy --prod --legacy /out
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
+COPY packages ./packages
+COPY apps ./apps
 
-# Stage 2: Runtime stage
-FROM node:20-alpine
+RUN apk add --no-cache git
+
+RUN pnpm fetch \
+	--filter @e-invoice-eu/core... \
+	--filter @e-invoice-eu/server...
+
+RUN pnpm install --offline --frozen-lockfile \
+	--filter @e-invoice-eu/core... \
+	--filter @e-invoice-eu/server...
+
+RUN pnpm \
+	--filter @e-invoice-eu/core \
+	--filter @e-invoice-eu/server build
+
+RUN pnpm --filter @e-invoice-eu/server deploy --legacy --prod /app/out
+
+# Stage 2: Runtime
+FROM node:26-alpine
 
 ENV NODE_ENV=production
+ENV LIBREOFFICE=libreoffice
 
 WORKDIR /app
 
-COPY --from=builder /out ./
+ARG WITH_LIBREOFFICE=true
+RUN if [ "$WITH_LIBREOFFICE" != "false" ]; then \
+	apk add --no-cache \
+		libreoffice \
+		openjdk8-jre \
+		ttf-freefont \
+		font-noto \
+		font-noto-cjk \
+		font-noto-emoji; \
+	fi
 
-# Create a non-root user
+# Update all packages. Also, uninstall npm. They only
+# drag in security issues.
+RUN apk update \
+	&& apk upgrade --no-cache \
+	&& rm -r /usr/local/lib/node_modules/npm \
+	/usr/local/bin/npm
+
+WORKDIR /app
+
+COPY --from=builder /app/out .
+
+# Non-root user
 RUN addgroup -S e-invoice-eu && adduser -S e-invoice-eu -G e-invoice-eu
-
 USER e-invoice-eu
 
 EXPOSE 3000

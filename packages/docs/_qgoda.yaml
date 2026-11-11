@@ -21,15 +21,14 @@ exclude-watch:
   - '!/_timestamp.json'
   - '!/_guidoed_tour.yaml'
 helpers:
-  webpack: pnpm run start
-  browser-sync: pnpm run server
+  webpack: npm run start
 permalink: /e-invoice-eu{significant-path}
-# Do not switch that to bun! That doesn't work inside the Dockerfile.
+# Do not switch that to pnpm! That doesn't work inside the Dockerfile.
 pre-build:
   - name: install
-    run: pnpm install
+    run: npm install
   - name: webpack
-    run: pnpm run build
+    run: npm run build
 # See https://github.com/peaceiris/actions-gh-pages/issues/892!
 post-build:
   - name: disable-jekyll
@@ -104,7 +103,7 @@ private:
     street: ul. Vitosha 4
     city: 2111 Petkovo
     copyright_uri: https://www.cantanea.com/
-    copyright_year: 2024-2025
+    copyright_year: 2024-2026
     id: BULSTAT 202526954
     vat-id: BG202526944
     manager: Guido Flohr

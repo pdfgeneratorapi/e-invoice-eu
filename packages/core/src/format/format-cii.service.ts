@@ -1,13 +1,16 @@
 import { Invoice } from '@e-invoice-eu/core';
+import { type JSONSchemaType } from 'ajv';
 import * as jsonpath from 'jsonpath-plus';
-
-import { FormatUBLService } from './format-ubl.service';
-import { EInvoiceFormat } from './format.e-invoice-format.interface';
+import { ExpandObject } from 'xmlbuilder2/lib/interfaces';
+import { ValueAddedTaxPointDateCode } from '../invoice/invoice.interface';
 import { InvoiceServiceOptions } from '../invoice/invoice.service';
-
-// This is what we are looking at while traversing the input tree:
-export type Node = { [key: string]: Node } | Node[] | string;
-export type ObjectNode = { [key: string]: Node };
+import { addCurrency } from '../utils/add-currency';
+import { prependKey } from '../utils/prepend-key';
+import { prunePath } from '../utils/prune-path';
+import { renameKey } from '../utils/rename-key';
+import { vivifyPath } from '../utils/vivify-path';
+import { EInvoiceFormat } from './format.e-invoice-format.interface';
+import { FormatUBLService } from './format-ubl.service';
 
 // Flags for Factur-X usage.
 export type FXProfile =
@@ -147,7 +150,13 @@ const cacCommodityClassification: Transformation = {
 		{
 			type: 'string',
 			src: ['cbc:ItemClassificationCode'],
-			dest: ['ram:ClassCode', 'ram:ListID'],
+			dest: ['ram:ClassCode'],
+			fxProfileMask: FX_MASK_EN16931,
+		},
+		{
+			type: 'string',
+			src: ['cbc:ItemClassificationCode@listID'],
+			dest: ['ram:ClassCode@listID'],
 			fxProfileMask: FX_MASK_EN16931,
 		},
 	],
@@ -229,29 +238,6 @@ const cacPrice: Transformation = {
 	children: [
 		{
 			type: 'object',
-			src: [],
-			dest: [
-				'ram:SpecifiedLineTradeAgreement',
-				'ram:GrossPriceProductTradePrice',
-			],
-			children: [
-				{
-					type: 'string',
-					src: ['cbc:BaseQuantity'],
-					dest: ['ram:BasisQuantity'],
-					fxProfileMask: FX_MASK_EN16931,
-				},
-				{
-					type: 'string',
-					src: ['cbc:BaseQuantity@unitCode'],
-					dest: ['ram:BasisQuantity@unitCode'],
-					fxProfileMask: FX_MASK_EN16931,
-				},
-			],
-			fxProfileMask: FX_MASK_EN16931,
-		},
-		{
-			type: 'object',
 			src: ['cac:AllowanceCharge'],
 			dest: [
 				'ram:SpecifiedLineTradeAgreement',
@@ -277,30 +263,45 @@ const cacPrice: Transformation = {
 				{
 					type: 'string',
 					src: ['cbc:Amount'],
-					dest: ['ram:AppliedTradeAllowanceCharge', 'ram:ActualAmount'],
-					fxProfileMask: FX_MASK_EN16931,
-				},
-				{
-					type: 'string',
-					src: ['cbc:Amount@currencyID'],
 					dest: [
 						'ram:AppliedTradeAllowanceCharge',
-						'ram:ActualAmount@currencyID',
+						'ram:ActualAmount',
 					],
 					fxProfileMask: FX_MASK_EN16931,
 				},
+				// currencyID omitted: CII-DT-031 forbids @currencyID on
+				// Amount elements (except TaxTotalAmount).
 			],
 			fxProfileMask: FX_MASK_EN16931,
 		},
 		{
-			type: 'string',
-			src: ['cbc:PriceAmount'],
+			type: 'object',
+			src: [],
 			dest: [
 				'ram:SpecifiedLineTradeAgreement',
 				'ram:NetPriceProductTradePrice',
-				'ram:ChargeAmount',
 			],
-			fxProfileMask: FX_MASK_BASIC,
+			children: [
+				{
+					type: 'string',
+					src: ['cbc:PriceAmount'],
+					dest: ['ram:ChargeAmount'],
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
+				{
+					type: 'string',
+					src: ['cbc:BaseQuantity'],
+					dest: ['ram:BasisQuantity'],
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
+				{
+					type: 'string',
+					src: ['cbc:BaseQuantity@unitCode'],
+					dest: ['ram:BasisQuantity@unitCode'],
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
+			],
+			fxProfileMask: FX_MASK_BASIC_WL,
 		},
 	],
 	fxProfileMask: FX_MASK_MINIMUM,
@@ -367,22 +368,12 @@ const cacInvoiceLineAllowanceCharge: Transformation = {
 			dest: ['ram:BasisAmount'],
 			fxProfileMask: FX_MASK_BASIC,
 		},
-		{
-			type: 'string',
-			src: ['cbc:BaseAmount@currencyID'],
-			dest: ['ram:BasisAmount@currencyID'],
-			fxProfileMask: FX_MASK_BASIC,
-		},
+		// currencyID omitted on BasisAmount and ActualAmount:
+		// CII-DT-031 forbids @currencyID on Amount elements (except TaxTotalAmount).
 		{
 			type: 'string',
 			src: ['cbc:Amount'],
 			dest: ['ram:ActualAmount'],
-			fxProfileMask: FX_MASK_BASIC,
-		},
-		{
-			type: 'string',
-			src: ['cbc:Amount@currencyID'],
-			dest: ['ram:ActualAmount@currencyID'],
 			fxProfileMask: FX_MASK_BASIC,
 		},
 		{
@@ -401,10 +392,15 @@ const cacInvoiceLineAllowanceCharge: Transformation = {
 	fxProfileMask: FX_MASK_MINIMUM,
 };
 
+// BT-128 (Invoice line object identifier).  In CII, it belongs in the line
+// trade settlement, after the line monetary summation.
 const cacDocumentReference: Transformation = {
 	type: 'object',
 	src: ['cac:DocumentReference'],
-	dest: ['ram:AdditionalReferencedDocument'],
+	dest: [
+		'ram:SpecifiedLineTradeSettlement',
+		'ram:AdditionalReferencedDocument',
+	],
 	children: [
 		{
 			type: 'string',
@@ -418,9 +414,37 @@ const cacDocumentReference: Transformation = {
 			dest: ['ram:TypeCode'],
 			fxProfileMask: FX_MASK_EN16931,
 		},
+		{
+			type: 'string',
+			src: ['cbc:ID@schemeID'],
+			dest: ['ram:ReferenceTypeCode'],
+			fxProfileMask: FX_MASK_EN16931,
+		},
 	],
 	fxProfileMask: FX_MASK_MINIMUM,
 };
+
+const cacBillingReference: Transformation[] = [
+	{
+		type: 'string',
+		src: ['cac:InvoiceDocumentReference', 'cbc:ID'],
+		dest: ['ram:IssuerAssignedID'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		subtype: 'DateTimeString',
+		src: ['cac:InvoiceDocumentReference', 'cbc:IssueDate'],
+		dest: ['ram:FormattedIssueDateTime', 'qdt:DateTimeString'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cac:InvoiceDocumentReference', 'cbc:IssueDate', 'fixed:102'],
+		dest: ['ram:FormattedIssueDateTime', 'qdt:DateTimeString@format'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+];
 
 const cacInvoiceLine: Transformation = {
 	type: 'array',
@@ -455,12 +479,20 @@ const cacInvoiceLine: Transformation = {
 		{
 			type: 'string',
 			src: ['cbc:InvoicedQuantity@unitCode'],
-			dest: ['ram:SpecifiedLineTradeDelivery', 'ram:BilledQuantity@unitCode'],
+			dest: [
+				'ram:SpecifiedLineTradeDelivery',
+				'ram:BilledQuantity@unitCode',
+			],
 			fxProfileMask: FX_MASK_BASIC,
 		},
 		{
 			type: 'string',
-			src: ['cac:Item', 'cac:ClassifiedTaxCategory', 'cac:TaxScheme', 'cbc:ID'],
+			src: [
+				'cac:Item',
+				'cac:ClassifiedTaxCategory',
+				'cac:TaxScheme',
+				'cbc:ID',
+			],
 			dest: [
 				'ram:SpecifiedLineTradeSettlement',
 				'ram:ApplicableTradeTax',
@@ -590,20 +622,30 @@ export const cacSupplierPartyTaxScheme: Transformation[] = [
 	},
 ];
 
+export const cacSupplierPartyIdentification: Transformation[] = [
+	{
+		type: 'string',
+		src: ['cbc:ID'],
+		// This may be downgraded to ram:ID in the post-processing.
+		dest: ['ram:GlobalID'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cbc:ID@schemeID'],
+		dest: ['ram:GlobalID@schemeID'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+];
+
 export const cacAccountingSupplierParty: Transformation[] = [
 	{
 		type: 'array',
-		src: [],
-		dest: [],
-		children: [
-			{
-				type: 'string',
-				src: ['cac:PartyIdentification', 'cbc:ID'],
-				dest: ['ram:ID'],
-				fxProfileMask: FX_MASK_BASIC_WL,
-			},
-		],
-		fxProfileMask: FX_MASK_MINIMUM,
+		src: ['cac:PartyIdentification'],
+		// This layer gets removed in the post-processing.
+		dest: ['dummy:PartyIdentification'],
+		children: cacSupplierPartyIdentification,
+		fxProfileMask: FX_MASK_BASIC_WL,
 	},
 	{
 		type: 'string',
@@ -613,7 +655,7 @@ export const cacAccountingSupplierParty: Transformation[] = [
 	},
 	{
 		type: 'string',
-		src: ['cac:PartyLegalEntity', 'cbc:LegalForm'],
+		src: ['cac:PartyLegalEntity', 'cbc:CompanyLegalForm'],
 		dest: ['ram:Description'],
 		fxProfileMask: FX_MASK_EN16931,
 	},
@@ -693,7 +735,13 @@ export const cacAccountingCustomerParty: Transformation[] = [
 	{
 		type: 'string',
 		src: ['cac:PartyIdentification', 'cbc:ID'],
-		dest: ['ram:ID'],
+		dest: ['ram:GlobalID'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cac:PartyIdentification', 'cbc:ID@schemeID'],
+		dest: ['ram:GlobalID@schemeID'],
 		fxProfileMask: FX_MASK_BASIC_WL,
 	},
 	{
@@ -704,7 +752,7 @@ export const cacAccountingCustomerParty: Transformation[] = [
 	},
 	{
 		type: 'string',
-		src: ['cac:PartyLegalEntity', 'cbc:LegalForm'],
+		src: ['cac:PartyLegalEntity', 'cbc:CompanyLegalForm'],
 		dest: ['ram:Description'],
 		fxProfileMask: FX_MASK_EN16931,
 	},
@@ -725,6 +773,32 @@ export const cacAccountingCustomerParty: Transformation[] = [
 		src: ['cac:PartyName', 'cbc:Name'],
 		dest: ['ram:SpecifiedLegalOrganization', 'ram:TradingBusinessName'],
 		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cac:Contact', 'cbc:Name'],
+		dest: ['ram:DefinedTradeContact', 'ram:PersonName'],
+		fxProfileMask: FX_MASK_EN16931,
+	},
+	{
+		type: 'string',
+		src: ['cac:Contact', 'cbc:Telephone'],
+		dest: [
+			'ram:DefinedTradeContact',
+			'ram:TelephoneUniversalCommunication',
+			'ram:CompleteNumber',
+		],
+		fxProfileMask: FX_MASK_EN16931,
+	},
+	{
+		type: 'string',
+		src: ['cac:Contact', 'cbc:ElectronicMail'],
+		dest: [
+			'ram:DefinedTradeContact',
+			'ram:EmailURIUniversalCommunication',
+			'ram:URIID',
+		],
+		fxProfileMask: FX_MASK_EN16931,
 	},
 	{
 		type: 'object',
@@ -754,6 +828,29 @@ export const cacAccountingCustomerParty: Transformation[] = [
 	},
 ];
 
+export const cacTaxRepresentativeParty: Transformation[] = [
+	{
+		type: 'string',
+		src: ['cac:PartyName', 'cbc:Name'],
+		dest: ['ram:Name'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'object',
+		src: ['cac:PostalAddress'],
+		dest: ['ram:PostalTradeAddress'],
+		children: cacPostalAddress,
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'object',
+		src: ['cac:PartyTaxScheme'],
+		dest: ['ram:SpecifiedTaxRegistration'],
+		children: cacPartyTaxScheme,
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+];
+
 export const cacAdditionalDocumentReference: Transformation[] = [
 	{
 		type: 'string',
@@ -764,13 +861,13 @@ export const cacAdditionalDocumentReference: Transformation[] = [
 	{
 		type: 'string',
 		src: ['cac:Attachment', 'cac:ExternalReference', 'cbc:URI'],
-		dest: ['udt:URIID'],
+		dest: ['ram:URIID'],
 		fxProfileMask: FX_MASK_EN16931,
 	},
 	{
 		type: 'string',
 		src: ['cbc:DocumentTypeCode'],
-		dest: ['qdt:TypeCode'],
+		dest: ['ram:TypeCode'],
 		fxProfileMask: FX_MASK_EN16931,
 	},
 	{
@@ -797,9 +894,106 @@ export const cacAdditionalDocumentReference: Transformation[] = [
 		dest: ['ram:AttachmentBinaryObject@filename'],
 		fxProfileMask: FX_MASK_EN16931,
 	},
+	{
+		type: 'string',
+		src: ['cbc:ID@schemeID'],
+		dest: ['ram:ReferenceTypeCode'],
+		fxProfileMask: FX_MASK_EN16931,
+	},
+];
+
+export const deliveryAddress: Transformation[] = [
+	{
+		type: 'string',
+		src: ['cbc:PostalZone'],
+		dest: ['ram:PostcodeCode'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cbc:StreetName'],
+		dest: ['ram:LineOne'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cbc:AdditionalStreetName'],
+		dest: ['ram:LineTwo'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cac:AddressLine', 'cbc:Line'],
+		dest: ['ram:LineThree'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cbc:CityName'],
+		dest: ['ram:CityName'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cac:Country', 'cbc:IdentificationCode'],
+		dest: ['ram:CountryID'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cbc:CountrySubentity'],
+		dest: ['ram:CountrySubDivisionName'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
 ];
 
 export const cacDelivery: Transformation[] = [
+	// FIXME! This is an array for CII.
+	{
+		type: 'object',
+		src: [],
+		dest: ['ram:ShipToTradeParty'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+		children: [
+			{
+				type: 'string',
+				src: ['cac:DeliveryLocation', 'cbc:ID'],
+				dest: [
+					// This will be downgraded to ram:ID in the
+					// post-processing step if no schemeID attribute is
+					// present.
+					'ram:GlobalID',
+				],
+				fxProfileMask: FX_MASK_BASIC_WL,
+			},
+			{
+				type: 'string',
+				src: ['cac:DeliveryLocation', 'cbc:ID@schemeID'],
+				dest: [
+					// This will be downgraded to ram:ID in the
+					// post-processing step if no schemeID attribute is
+					// present.
+					'ram:GlobalID@schemeID',
+				],
+				fxProfileMask: FX_MASK_BASIC_WL,
+			},
+			{
+				type: 'string',
+				src: ['cac:DeliveryParty', 'cac:PartyName', 'cbc:Name'],
+				dest: ['ram:Name'],
+				fxProfileMask: FX_MASK_BASIC_WL,
+			},
+			{
+				type: 'object',
+				src: ['cac:DeliveryLocation', 'cac:Address'],
+				dest: ['ram:PostalTradeAddress'],
+				children: deliveryAddress,
+				// FIXME! This should actually be FX_EXTENDED, but changing
+				// it breaks something.
+				fxProfileMask: FX_MASK_MINIMUM,
+			},
+		],
+	},
 	{
 		type: 'string',
 		src: ['cbc:ActualDeliveryDate'],
@@ -823,102 +1017,17 @@ export const cacDelivery: Transformation[] = [
 	},
 ];
 
-export const deliveryAddress: Transformation[] = [
-	{
-		type: 'string',
-		src: ['cbc:PostalZone'],
-		dest: ['ram:PostcodeCode'],
-		fxProfileMask: FX_MASK_MINIMUM,
-	},
-	{
-		type: 'string',
-		src: ['cbc:StreetName'],
-		dest: ['ram:LineOne'],
-		fxProfileMask: FX_MASK_MINIMUM,
-	},
-	{
-		type: 'string',
-		src: ['cbc:AdditionalStreetName'],
-		dest: ['ram:LineTwo'],
-		fxProfileMask: FX_MASK_BASIC_WL,
-	},
-	{
-		type: 'string',
-		src: ['cac:AddressLine', 'cbc:Line'],
-		dest: ['ram:LineThree'],
-		fxProfileMask: FX_MASK_BASIC_WL,
-	},
-	{
-		type: 'string',
-		src: ['cbc:CityName'],
-		dest: ['ram:CityName'],
-		fxProfileMask: FX_MASK_MINIMUM,
-	},
-	{
-		type: 'string',
-		src: ['cac:Country', 'cbc:IdentificationCode'],
-		dest: ['ram:CountryID'],
-		fxProfileMask: FX_MASK_MINIMUM,
-	},
-	{
-		type: 'string',
-		src: ['cbc:CountrySubentity'],
-		dest: ['ram:CountrySubDivisionName'],
-		fxProfileMask: FX_MASK_BASIC_WL,
-	},
-];
-
-export const invoicePeriod: Transformation[] = [
-	{
-		type: 'string',
-		src: ['cbc:StartDate'],
-		dest: [
-			'ram:BillingSpecifiedPeriod',
-			'ram:StartDateTime',
-			'udt:DateTimeString',
-		],
-		subtype: 'DateTimeString',
-		fxProfileMask: FX_MASK_BASIC_WL,
-	},
-	{
-		type: 'string',
-		src: ['fixed:102'],
-		dest: [
-			'ram:BillingSpecifiedPeriod',
-			'ram:StartDateTime',
-			'udt:DateTimeString@format',
-		],
-		fxProfileMask: FX_MASK_BASIC_WL,
-	},
-	{
-		type: 'string',
-		src: ['cbc:EndDate'],
-		dest: [
-			'ram:BillingSpecifiedPeriod',
-			'ram:EndDateTime',
-			'udt:DateTimeString',
-		],
-		subtype: 'DateTimeString',
-		fxProfileMask: FX_MASK_BASIC_WL,
-	},
-	{
-		type: 'string',
-		src: ['fixed:102'],
-		dest: [
-			'ram:BillingSpecifiedPeriod',
-			'ram:EndDateTime',
-			'udt:DateTimeString@format',
-		],
-		fxProfileMask: FX_MASK_BASIC_WL,
-	},
-];
-
 const cacPayeeParty: Transformation[] = [
 	{
-		// FIXME! This is an array for certain CII variants.
 		type: 'string',
 		src: ['cac:PartyIdentification', 'cbc:ID'],
-		dest: ['ram:ID'],
+		dest: ['ram:GlobalID'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		src: ['cac:PartyIdentification', 'cbc:ID@schemeID'],
+		dest: ['ram:GlobalID@schemeID'],
 		fxProfileMask: FX_MASK_BASIC_WL,
 	},
 	{
@@ -963,7 +1072,10 @@ const cacPaymentMeans: Transformation[] = [
 	{
 		type: 'string',
 		src: ['cac:CardAccount', 'cbc:HolderName'],
-		dest: ['ram:ApplicableTradeSettlementFinancialCard', 'ram:CardHolderName'],
+		dest: [
+			'ram:ApplicableTradeSettlementFinancialCard',
+			'ram:CardholderName',
+		],
 		fxProfileMask: FX_MASK_EN16931,
 	},
 	{
@@ -1032,6 +1144,19 @@ export const cacTaxSubtotal: Transformation[] = [
 		src: ['cac:TaxCategory', 'cbc:TaxExemptionReasonCode'],
 		dest: ['ram:ExemptionReasonCode'],
 		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		subtype: 'DateTimeString',
+		src: ['..', '..', 'cbc:TaxPointDate'],
+		dest: ['ram:TaxPointDate', 'udt:DateString'],
+		fxProfileMask: FX_MASK_EN16931,
+	},
+	{
+		type: 'string',
+		src: ['..', '..', 'cbc:TaxPointDate', 'fixed:102'],
+		dest: ['ram:TaxPointDate', 'udt:DateString@format'],
+		fxProfileMask: FX_MASK_EN16931,
 	},
 	{
 		type: 'string',
@@ -1303,6 +1428,16 @@ export const ublInvoice: Transformation = {
 			fxProfileMask: FX_MASK_BASIC_WL,
 		},
 		{
+			type: 'string',
+			src: ['x-cii:SubjectCode'],
+			dest: [
+				'rsm:ExchangedDocument',
+				'ram:IncludedNote',
+				'ram:SubjectCode',
+			],
+			fxProfileMask: FX_MASK_BASIC_WL,
+		},
+		{
 			type: 'object',
 			src: [],
 			dest: ['rsm:SupplyChainTradeTransaction'],
@@ -1311,25 +1446,74 @@ export const ublInvoice: Transformation = {
 				{
 					type: 'string',
 					src: ['cbc:BuyerReference'],
-					dest: ['ram:ApplicableHeaderTradeAgreement', 'ram:BuyerReference'],
+					dest: [
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:BuyerReference',
+					],
 					fxProfileMask: FX_MASK_MINIMUM,
 				},
 				{
 					type: 'object',
 					src: ['cac:AccountingSupplierParty', 'cac:Party'],
-					dest: ['ram:ApplicableHeaderTradeAgreement', 'ram:SellerTradeParty'],
+					dest: [
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:SellerTradeParty',
+					],
 					children: cacAccountingSupplierParty,
 					fxProfileMask: FX_MASK_MINIMUM,
 				},
 				{
 					type: 'object',
 					src: ['cac:AccountingCustomerParty', 'cac:Party'],
-					dest: ['ram:ApplicableHeaderTradeAgreement', 'ram:BuyerTradeParty'],
+					dest: [
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:BuyerTradeParty',
+					],
 					children: cacAccountingCustomerParty,
 					fxProfileMask: FX_MASK_MINIMUM,
 				},
 				{
 					type: 'object',
+					src: ['cac:TaxRepresentativeParty'],
+					dest: [
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:SellerTaxRepresentativeTradeParty',
+					],
+					children: cacTaxRepresentativeParty,
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
+				{
+					type: 'string',
+					src: ['cac:OrderReference', 'cbc:SalesOrderID'],
+					dest: [
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:SellerOrderReferencedDocument',
+						'ram:IssuerAssignedID',
+					],
+					fxProfileMask: FX_MASK_EN16931,
+				},
+				{
+					type: 'string',
+					src: ['cac:OrderReference', 'cbc:ID'],
+					dest: [
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:BuyerOrderReferencedDocument',
+						'ram:IssuerAssignedID',
+					],
+					fxProfileMask: FX_MASK_MINIMUM,
+				},
+				{
+					type: 'string',
+					src: ['cac:ContractDocumentReference', 'cbc:ID'],
+					dest: [
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:ContractReferencedDocument',
+						'ram:IssuerAssignedID',
+					],
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
+				{
+					type: 'array',
 					src: ['cac:AdditionalDocumentReference'],
 					dest: [
 						'ram:ApplicableHeaderTradeAgreement',
@@ -1339,28 +1523,75 @@ export const ublInvoice: Transformation = {
 					fxProfileMask: FX_MASK_MINIMUM,
 				},
 				{
-					type: 'object',
-					src: [],
-					dest: ['ram:ApplicableHeaderTradeDelivery'],
-					children: [],
-					fxProfileMask: FX_MASK_MINIMUM,
-				},
-				{
-					type: 'object',
-					src: ['cac:Delivery', 'cac:DeliveryLocation', 'cac:Address'],
+					type: 'string',
+					src: ['cac:ProjectReference', 'cbc:ID'],
 					dest: [
-						'ram:ApplicableHeaderTradeDelivery',
-						'ram:ShipToTradeParty',
-						'ram:PostalTradeAddress',
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:SpecifiedProcuringProject',
+						'ram:ID',
 					],
-					children: deliveryAddress,
-					fxProfileMask: FX_MASK_BASIC_WL,
+					fxProfileMask: FX_MASK_EN16931,
+				},
+				// CII requires both an ID and a name but UBL only defines the
+				// ID.
+				{
+					type: 'string',
+					src: ['cac:ProjectReference', 'cbc:ID'],
+					dest: [
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:SpecifiedProcuringProject',
+						'ram:Name',
+					],
+					fxProfileMask: FX_MASK_EN16931,
 				},
 				{
 					type: 'object',
 					src: ['cac:Delivery'],
 					dest: ['ram:ApplicableHeaderTradeDelivery'],
 					children: cacDelivery,
+					fxProfileMask: FX_MASK_MINIMUM,
+				},
+				// The despatch and receiving advice references are top-level
+				// elements in UBL but follow the delivery details in CII.
+				{
+					type: 'string',
+					src: ['cac:DespatchDocumentReference', 'cbc:ID'],
+					dest: [
+						'ram:ApplicableHeaderTradeDelivery',
+						'ram:DespatchAdviceReferencedDocument',
+						'ram:IssuerAssignedID',
+					],
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
+				{
+					type: 'string',
+					src: ['cac:ReceiptDocumentReference', 'cbc:ID'],
+					dest: [
+						'ram:ApplicableHeaderTradeDelivery',
+						'ram:ReceivingAdviceReferencedDocument',
+						'ram:IssuerAssignedID',
+					],
+					fxProfileMask: FX_MASK_EN16931,
+				},
+				// BT-60 (Payee identifier) is mapped inside cacPayeeParty
+				// as ram:PayeeTradeParty/ram:ID. The previous mapping here
+				// incorrectly placed it in ram:CreditorReferenceID (BT-90).
+				{
+					type: 'string',
+					src: ['cac:PaymentMeans[0]', 'cbc:PaymentID'],
+					dest: [
+						'ram:ApplicableHeaderTradeSettlement',
+						'ram:PaymentReference',
+					],
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
+				{
+					type: 'string',
+					src: ['cbc:TaxCurrencyCode'],
+					dest: [
+						'ram:ApplicableHeaderTradeSettlement',
+						'ram:TaxCurrencyCode',
+					],
 					fxProfileMask: FX_MASK_BASIC_WL,
 				},
 				{
@@ -1375,7 +1606,10 @@ export const ublInvoice: Transformation = {
 				{
 					type: 'object',
 					src: ['cac:PayeeParty'],
-					dest: ['ram:ApplicableHeaderTradeSettlement', 'ram:PayeeTradeParty'],
+					dest: [
+						'ram:ApplicableHeaderTradeSettlement',
+						'ram:PayeeTradeParty',
+					],
 					children: cacPayeeParty,
 					fxProfileMask: FX_MASK_MINIMUM,
 				},
@@ -1442,6 +1676,20 @@ export const ublInvoice: Transformation = {
 					],
 					fxProfileMask: FX_MASK_BASIC_WL,
 				},
+				{
+					type: 'string',
+					src: [
+						'cac:PaymentMeans[0]',
+						'cac:PaymentMandate',
+						'cbc:ID',
+					],
+					dest: [
+						'ram:ApplicableHeaderTradeSettlement',
+						'ram:SpecifiedTradePaymentTerms',
+						'ram:DirectDebitMandateID',
+					],
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
 				cacLegalMonetaryTotal,
 				{
 					type: 'array',
@@ -1450,15 +1698,18 @@ export const ublInvoice: Transformation = {
 						'ram:ApplicableHeaderTradeSettlement',
 						'ram:InvoiceReferencedDocument',
 					],
-					children: [
-						{
-							type: 'string',
-							src: ['cbc:ID'],
-							dest: ['ram:IssuerAssignedID'],
-							fxProfileMask: FX_MASK_BASIC_WL,
-						},
-					],
+					children: cacBillingReference,
 					fxProfileMask: FX_MASK_MINIMUM,
+				},
+				{
+					type: 'string',
+					src: ['cbc:AccountingCost'],
+					dest: [
+						'ram:ApplicableHeaderTradeSettlement',
+						'ram:ReceivableSpecifiedTradeAccountingAccount',
+						'ram:ID',
+					],
+					fxProfileMask: FX_MASK_BASIC_WL,
 				},
 			],
 			fxProfileMask: FX_MASK_MINIMUM,
@@ -1487,12 +1738,68 @@ export class FormatCIIService
 		return FULL_CII;
 	}
 
+	public patchSchema(_schema: JSONSchemaType<Invoice>) {}
+
+	public patchInvoice(invoice: Invoice) {
+		// CII and UBL use different codes for the due date description code.
+		// We allow both versions, and silently convert to the correct value
+		// for the selected format.
+		const eventTimeCodeMapping: Record<
+			ValueAddedTaxPointDateCode,
+			ValueAddedTaxPointDateCode
+		> = {
+			'3': '5',
+			'5': '5',
+			'29': '29',
+			'35': '29',
+			'72': '72',
+			'432': '72',
+		};
+
+		const code =
+			invoice['ubl:Invoice']['cac:InvoicePeriod']?.[
+				'cbc:DescriptionCode'
+			];
+		if (typeof code !== 'undefined') {
+			invoice['ubl:Invoice']['cac:InvoicePeriod']![
+				'cbc:DescriptionCode'
+			] = eventTimeCodeMapping[code] ?? code;
+		}
+
+		// In UBL, only the invoiced object identifier (BT-18) has a document
+		// type code (130), additional supporting documents (BG-24) have none.
+		// CII identifies the latter by the code 916 (related document).  The
+		// scheme identifier (BT-18-1) only exists for BT-18.
+		for (const reference of invoice['ubl:Invoice'][
+			'cac:AdditionalDocumentReference'
+		] ?? []) {
+			reference['cbc:DocumentTypeCode'] ??= '916';
+			if (reference['cbc:DocumentTypeCode'] !== '130') {
+				delete reference['cbc:ID@schemeID'];
+			}
+		}
+
+		// UBL has a dedicated element for the tender or lot reference (BT-17).
+		// CII writes it as an additional referenced document with the code 50
+		// (price/sales catalogue response).
+		const tenderReference =
+			invoice['ubl:Invoice']['cac:OriginatorDocumentReference']?.[
+				'cbc:ID'
+			];
+		if (typeof tenderReference !== 'undefined') {
+			invoice['ubl:Invoice']['cac:AdditionalDocumentReference'] = [
+				...(invoice['ubl:Invoice']['cac:AdditionalDocumentReference'] ??
+					[]),
+				{ 'cbc:ID': tenderReference, 'cbc:DocumentTypeCode': '50' },
+			];
+		}
+	}
+
 	async generate(
 		invoice: Invoice,
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
-		_options: InvoiceServiceOptions,
+		options: InvoiceServiceOptions,
 	): Promise<string | Uint8Array> {
-		const cii: ObjectNode = {};
+		const cii: ExpandObject = {};
 
 		this.convert(invoice, '$', cii, '$', [ublInvoice]);
 
@@ -1514,36 +1821,54 @@ export class FormatCIIService
 
 		this.postProcess(cii);
 
+		if (options.postProcessor) {
+			await options.postProcessor(cii);
+		}
+
 		return this.renderXML(cii);
 	}
 
-	private postProcess(cii: ObjectNode) {
+	private postProcess(cii: ExpandObject) {
+		this.postProcessSellerTradeParty(cii);
+		this.postProcessPayeeParty(cii);
+
 		// If the delivery location ID does not have a scheme, downgrade it from
 		// ram:GlobalID to ram:ID.
-		const shipTo =
-			cii['rsm:CrossIndustryInvoice']?.['rsm:SupplyChainTradeTransaction']?.[
-				'ram:ApplicableHeaderTradeDelivery'
-			]?.['ram:ShipToTradeParty'];
+		const buyerParty =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeAgreement']?.['ram:BuyerTradeParty'];
 
-		if (shipTo?.['ram:GlobalID'] && !shipTo['ram:GlobalID@schemeID']) {
-			shipTo['ram:ID'] = shipTo['ram:GlobalID'];
-			delete shipTo['ram:GlobalID'];
+		if (
+			buyerParty?.['ram:GlobalID'] &&
+			!buyerParty['ram:GlobalID@schemeID']
+		) {
+			renameKey(buyerParty, 'ram:GlobalID', 'ram:ID');
 		}
 
-		const supplierTaxRegistration = cii['rsm:CrossIndustryInvoice']?.
-			['rsm:SupplyChainTradeTransaction']?.
-			['ram:ApplicableHeaderTradeAgreement']?.
-			['ram:SellerTradeParty']?.
-			['ram:SpecifiedTaxRegistration']?.
-			[0];
+		// Same as above.
+		const shipTo =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeDelivery']?.['ram:ShipToTradeParty'];
 
-		const supplierTaxIDScheme = cii['rsm:CrossIndustryInvoice']?.
-			['rsm:SupplyChainTradeTransaction']?.
-			['ram:ApplicableHeaderTradeAgreement']?.
-			['ram:SellerTradeParty']?.
-			['ram:SpecifiedTaxRegistration']?.
-			[0]?.
-			['ram:ID@schemeID'];
+		if (shipTo?.['ram:GlobalID'] && !shipTo['ram:GlobalID@schemeID']) {
+			renameKey(shipTo, 'ram:GlobalID', 'ram:ID');
+		}
+
+		const supplierTaxRegistration =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeAgreement']?.[
+				'ram:SellerTradeParty'
+			]?.['ram:SpecifiedTaxRegistration']?.[0];
+
+		const supplierTaxIDScheme =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeAgreement']?.[
+				'ram:SellerTradeParty'
+			]?.['ram:SpecifiedTaxRegistration']?.[0]?.['ram:ID@schemeID'];
 		if (supplierTaxRegistration && supplierTaxIDScheme) {
 			if (supplierTaxIDScheme === 'VAT') {
 				supplierTaxRegistration['ram:ID@schemeID'] = 'VA';
@@ -1551,12 +1876,250 @@ export class FormatCIIService
 				supplierTaxRegistration['ram:ID@schemeID'] = 'FC';
 			}
 		}
+
+		this.postProcessTradeDelivery(cii);
+		this.postProcessNotes(cii);
+		this.postProcessPriceAllowances(cii);
+	}
+
+	private postProcessSellerTradeParty(cii: ExpandObject) {
+		const sellerParty =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeAgreement']?.['ram:SellerTradeParty'];
+
+		if (!sellerParty) return; // Can happen in tests.
+
+		type PartyIdentification = {
+			'ram:GlobalID': string;
+			'ram:GlobalID@schemeID'?: string;
+		};
+		const partyIdentifications: PartyIdentification[] =
+			sellerParty['dummy:PartyIdentification'];
+		if (!partyIdentifications) return;
+
+		delete sellerParty['dummy:PartyIdentification'];
+		const localIDs: string[] = [];
+		type GlobalID = {
+			'#': string;
+			'ram:GlobalID@schemeID': string;
+		};
+		const globalIDs: GlobalID[] = [];
+		let sepa: string | undefined = undefined;
+
+		for (const pi of partyIdentifications) {
+			if (pi['ram:GlobalID@schemeID']) {
+				if (pi['ram:GlobalID@schemeID'] === 'SEPA') {
+					if (typeof sepa === 'undefined') {
+						sepa = pi['ram:GlobalID'];
+					} // Silently overwrite previous SEPA ids.
+				} else {
+					globalIDs.push({
+						'#': pi['ram:GlobalID'],
+						'ram:GlobalID@schemeID': pi['ram:GlobalID@schemeID'],
+					});
+				}
+			} else {
+				localIDs.push(pi['ram:GlobalID']);
+			}
+		}
+
+		// Rebuild sellerParty with ram:ID and ram:GlobalID first.
+		const orderedSellerParty: ExpandObject = {};
+
+		// Add local IDs first.
+		if (localIDs.length) {
+			orderedSellerParty['ram:ID'] = localIDs;
+		}
+
+		// Add global IDs that are *not* SEPA.
+		if (globalIDs.length) {
+			orderedSellerParty['ram:GlobalID'] = globalIDs.map(gid => ({
+				'#': gid['#'],
+				'@schemeID': gid['ram:GlobalID@schemeID'],
+			}));
+		}
+
+		// Copy remaining original properties in their original order.
+		for (const key of Object.keys(sellerParty)) {
+			orderedSellerParty[key] = sellerParty[key];
+		}
+
+		// Replace the sellerParty object with the ordered one.
+		const parent =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeAgreement'];
+		if (globalIDs.length || localIDs.length) {
+			parent['ram:SellerTradeParty'] = orderedSellerParty;
+		} else {
+			prunePath(
+				cii,
+				'$.rsm:CrossIndustryInvoice.rsm:SupplyChainTradeTransaction.ram:ApplicableHeaderTradeAgreement.ram:SellerTradeParty',
+			);
+		}
+
+		if (typeof sepa !== 'undefined') {
+			this.insertCreditorReferenceID(cii, sepa);
+		}
+	}
+
+	private postProcessPayeeParty(cii: ExpandObject) {
+		const tradeSettlement =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeSettlement'];
+		if (!tradeSettlement) return;
+
+		const payeeParty = tradeSettlement['ram:PayeeTradeParty'];
+
+		if (!payeeParty) return;
+
+		if (payeeParty?.['ram:GlobalID']) {
+			if (payeeParty['ram:GlobalID@schemeID']) {
+				if ('SEPA' === payeeParty['ram:GlobalID@schemeID']) {
+					// See #593 and #479!
+					this.insertCreditorReferenceID(
+						cii,
+						payeeParty['ram:GlobalID'],
+					);
+					delete payeeParty['ram:GlobalID'];
+					delete payeeParty['ram:GlobalID@schemeID'];
+					if (!Object.keys(payeeParty).length) {
+						delete tradeSettlement['ram:PayeeTradeParty'];
+					}
+				}
+			} else {
+				// Downgrade to local ID.
+				renameKey(payeeParty, 'ram:GlobalID', 'ram:ID');
+			}
+		}
+	}
+
+	private insertCreditorReferenceID(cii: ExpandObject, id: string) {
+		vivifyPath(
+			cii,
+			'$.rsm:CrossIndustryInvoice.rsm:SupplyChainTradeTransaction.ram:ApplicableHeaderTradeSettlement',
+			{},
+		);
+		const parent =
+			cii['rsm:CrossIndustryInvoice']![
+				'rsm:SupplyChainTradeTransaction'
+			]!['ram:ApplicableHeaderTradeSettlement'];
+		prependKey(parent, 'ram:CreditorReferenceID', id);
+	}
+
+	private postProcessTradeDelivery(cii: ExpandObject) {
+		// This code is by GitHub user https://github.com/anvari182.
+		// See https://github.com/gflohr/e-invoice-eu/issues/626!
+		const root = cii['rsm:CrossIndustryInvoice'];
+		const tx = root?.['rsm:SupplyChainTradeTransaction'];
+		if (!tx || 'ram:ApplicableHeaderTradeDelivery' in tx) return;
+		const reordered = {};
+		for (const [key, value] of Object.entries(tx)) {
+			if (key === 'ram:ApplicableHeaderTradeSettlement') {
+				reordered['ram:ApplicableHeaderTradeDelivery'] = {};
+			}
+			reordered[key] = value;
+		}
+		root['rsm:SupplyChainTradeTransaction'] = reordered;
+	}
+
+	private postProcessNotes(cii: ExpandObject) {
+		const exchangedDoc =
+			cii['rsm:CrossIndustryInvoice']?.['rsm:ExchangedDocument'];
+		if (!exchangedDoc) return;
+
+		const notes = exchangedDoc['ram:IncludedNote']?.['ram:Content'] ?? [];
+		const subjectCodes =
+			exchangedDoc['ram:IncludedNote']?.['ram:SubjectCode'] ?? [];
+
+		const numNotes = Math.max(notes.length, subjectCodes.length);
+		if (!numNotes) return;
+
+		exchangedDoc['ram:IncludedNote'] = [];
+		for (let i = 0; i < numNotes; ++i) {
+			const note = notes[i];
+			const subjectCode = subjectCodes[i];
+			const item = {};
+			if (typeof note !== 'undefined' && note !== '') {
+				item['ram:Content'] = note;
+			}
+			if (typeof subjectCode !== 'undefined' && subjectCode !== '') {
+				item['ram:SubjectCode'] = subjectCode;
+			}
+			exchangedDoc['ram:IncludedNote'].push(item);
+		}
+	}
+
+	private postProcessPriceAllowances(cii: ExpandObject) {
+		const lineItems =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:IncludedSupplyChainTradeLineItem'];
+		if (!lineItems) return;
+
+		for (const lineItem of lineItems) {
+			const grossPrice =
+				lineItem['ram:SpecifiedLineTradeAgreement']?.[
+					'ram:GrossPriceProductTradePrice'
+				];
+			if (!grossPrice) continue;
+
+			const netPrice =
+				lineItem['ram:SpecifiedLineTradeAgreement']?.[
+					'ram:NetPriceProductTradePrice'
+				];
+			const basisQuantity = netPrice?.['ram:BasisQuantity'];
+			const basisQuantityUnitCode =
+				netPrice?.['ram:BasisQuantity@unitCode'];
+
+			const allowance = grossPrice['ram:AppliedTradeAllowanceCharge'];
+			if (!allowance) continue;
+
+			const chargeAmount = grossPrice['ram:ChargeAmount'];
+			if (chargeAmount) {
+				if (basisQuantity) {
+					delete grossPrice['ram:AppliedTradeAllowanceCharge'];
+					grossPrice['ram:BasisQuantity'] = basisQuantity;
+					if (basisQuantityUnitCode) {
+						grossPrice['ram:BasisQuantity@unitCode'] =
+							basisQuantityUnitCode;
+					}
+					grossPrice['ram:AppliedTradeAllowanceCharge'] = allowance;
+				}
+				continue;
+			}
+
+			const actualAmount = allowance['ram:ActualAmount'];
+			if (!actualAmount) continue;
+
+			const netChargeAmount = netPrice?.['ram:ChargeAmount'];
+			if (!netChargeAmount) continue;
+
+			grossPrice['ram:ChargeAmount'] = addCurrency(
+				netChargeAmount,
+				actualAmount,
+			);
+
+			if (basisQuantity) {
+				grossPrice['ram:BasisQuantity'] = basisQuantity;
+				if (basisQuantityUnitCode) {
+					grossPrice['ram:BasisQuantity@unitCode'] =
+						basisQuantityUnitCode;
+				}
+			}
+
+			// Reorder.
+			delete grossPrice['ram:AppliedTradeAllowanceCharge'];
+			grossPrice['ram:AppliedTradeAllowanceCharge'] = allowance;
+		}
 	}
 
 	private convert(
 		invoice: Invoice,
 		srcPath: string,
-		dest: ObjectNode,
+		dest: ExpandObject,
 		destPath: string,
 		transformations: Transformation[],
 	) {
@@ -1565,22 +2128,28 @@ export class FormatCIIService
 				continue;
 			}
 
-			const lastSrcKey = transformation.src[transformation.src.length - 1];
-			let src: any;
+			const lastSrcKey =
+				transformation.src[transformation.src.length - 1];
+			let src: string;
 			let childSrcPath: string;
 			// Avoid writing attribute values for non-existing nodes.
 			if (
 				transformation.src.length &&
 				lastSrcKey.startsWith('fixed:') &&
 				transformation.dest.length &&
-				transformation.dest[transformation.dest.length - 1].includes('@')
+				transformation.dest[transformation.dest.length - 1].includes(
+					'@',
+				)
 			) {
 				const parentPaths = [...transformation.dest];
 				parentPaths[parentPaths.length - 1] = parentPaths[
 					parentPaths.length - 1
 				].replace(/@.+/, '');
 				const parentPath = this.applySubPaths(destPath, parentPaths);
-				const parents = jsonpath.JSONPath({ path: parentPath, json: dest });
+				const parents = jsonpath.JSONPath({
+					path: parentPath,
+					json: dest,
+				});
 				if (Array.isArray(parents) && parents.length === 0) {
 					continue;
 				}
@@ -1588,20 +2157,31 @@ export class FormatCIIService
 				childSrcPath = srcPath;
 			} else {
 				childSrcPath = this.applySubPaths(srcPath, transformation.src);
-				const srcs = jsonpath.JSONPath({ path: childSrcPath, json: invoice });
+				const srcs = jsonpath.JSONPath({
+					path: childSrcPath,
+					json: invoice,
+				}) as string[];
 				if (Array.isArray(srcs) && srcs.length === 0) {
 					continue;
 				}
 				src = srcs[0];
 			}
 
-			const childDestPath = this.applySubPaths(destPath, transformation.dest);
+			const childDestPath = this.applySubPaths(
+				destPath,
+				transformation.dest,
+			);
 
 			switch (transformation.type) {
 				case 'object':
-					if (!transformation.children.length) {
+					if (
+						!transformation.children.length ||
+						('ram:ApplicableHeaderTradeDelivery' ===
+							transformation.dest[0] &&
+							this.fxProfile === FX_MINIMUM)
+					) {
 						// Special case.  Force the element to exist.
-						this.vivifyDest(dest, childDestPath, {});
+						vivifyPath(dest, childDestPath, {});
 					} else {
 						this.convert(
 							invoice,
@@ -1628,7 +2208,7 @@ export class FormatCIIService
 					}
 					break;
 				case 'string':
-					this.vivifyDest(
+					vivifyPath(
 						dest,
 						childDestPath,
 						this.renderValue(src, transformation),
@@ -1641,9 +2221,8 @@ export class FormatCIIService
 
 	private applySubPaths(path: string, subPaths: string[]) {
 		for (const subPath of subPaths) {
-			// FIXME! The first two branches seem to be dead code.
 			if (subPath === '..') {
-				path = path.replace(/[[.][^[.]+$/, '');
+				path = path.replace(/\.[^.]+$/, '');
 			} else if (subPath.startsWith('@')) {
 				const match = path.match(/^(.*?)(\[[0-9]+\])$/);
 				if (match) {
@@ -1660,35 +2239,6 @@ export class FormatCIIService
 		}
 
 		return path;
-	}
-
-	private vivifyDest(
-		dest: ObjectNode,
-		path: string,
-		value: string | ObjectNode,
-	) {
-		const indices = path.replace(/\[([0-9]+)\]/g, '.$1').split('.');
-
-		if (indices[0] === '$') {
-			indices.shift();
-		}
-
-		for (let i = 0; i < indices.length - 1; ++i) {
-			const key = indices[i];
-			const nextIndex = indices[i + 1];
-
-			const isNextArrayIndex = nextIndex.match(/^[0-9]+$/);
-
-			if (isNextArrayIndex) {
-				dest[key] ??= [];
-			} else {
-				dest[key] ??= {};
-			}
-
-			dest = dest[key] as ObjectNode;
-		}
-
-		dest[indices[indices.length - 1]] = value;
 	}
 
 	private renderValue(value: string, transformation: Transformation): string {

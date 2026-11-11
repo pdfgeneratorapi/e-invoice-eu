@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-
+import { beforeEach, describe, expect, it } from 'vitest';
 import { AppConfigService } from './app-config.service';
 
 describe('AppConfigService', () => {

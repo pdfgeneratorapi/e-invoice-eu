@@ -1,6 +1,7 @@
 import { JSONSchemaType } from 'ajv';
+import { describe, expect, it } from 'vitest';
 
-import { sortBySchema } from './sort-by-schema';
+import { sortBySchema } from './sort-by-schema.js';
 
 type Bedroom = {
 	owner: string;
@@ -214,20 +215,26 @@ describe('Sort by schema', () => {
 	});
 
 	it('should throw an exception if the object is null', () => {
-		expect(() => sortBySchema(null as unknown as House, houseSchema)).toThrow(
-			'Data must be a non-null object.',
-		);
+		expect(() =>
+			sortBySchema(null as unknown as House, houseSchema),
+		).toThrow('Data must be a non-null object.');
 	});
 
 	it('should throw an exception if the schema is not valid', () => {
 		expect(() =>
-			sortBySchema(unsortedHouse, 'schema' as unknown as JSONSchemaType<House>),
+			sortBySchema(
+				unsortedHouse,
+				'schema' as unknown as JSONSchemaType<House>,
+			),
 		).toThrow('Schema must be a valid JSON schema.');
 	});
 
 	it('should throw an exception if the schema is null', () => {
 		expect(() =>
-			sortBySchema(unsortedHouse, null as unknown as JSONSchemaType<House>),
+			sortBySchema(
+				unsortedHouse,
+				null as unknown as JSONSchemaType<House>,
+			),
 		).toThrow('Schema must be a valid JSON schema.');
 	});
 

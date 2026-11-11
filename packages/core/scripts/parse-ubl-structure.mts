@@ -9,9 +9,12 @@ import { JSONSchemaType } from 'ajv';
 import { XMLParser } from 'fast-xml-parser';
 import * as fs from 'fs';
 import * as path from 'path';
+import { ExpandObject } from 'xmlbuilder2/lib/interfaces.js';
 
 // Data types:
-// - Amount: number >= zero, max. 2 decimal digits.
+// - Amount: number >= zero, max. 2 decimal digits (EN 16931 §6.5.2).
+// - UnitPriceAmount: like Amount but unlimited decimal digits (EN 16931 §6.5.3).
+//   Applied to BT-146, BT-147, BT-148 via patchSchemaForUnitPriceAmount().
 // - Binary object: Base64 string
 // - Code
 // - Date
@@ -26,6 +29,24 @@ type Cardinality = {
 	max: number;
 };
 
+type XmlTextNode = { '#text': string };
+
+type XmlNode = {
+	Term?: XmlTextNode[];
+	Name?: XmlTextNode[];
+	Description?: XmlTextNode[];
+	DataType?: XmlTextNode[];
+	Reference?: XmlTextNode[];
+	Attribute?: XmlNode[];
+	Value?: XmlTextNode[];
+	Element?: XmlNode[];
+	':@'?: {
+		'@_type'?: string;
+		'@_usage'?: string;
+		'@_cardinality'?: string;
+	};
+};
+
 type Element = {
 	Term: string;
 	Name?: string;
@@ -35,7 +56,6 @@ type Element = {
 	BusinessTerms?: string[];
 	children?: Array<Element>;
 	cardinality?: string;
-
 	// For Docs.
 	rules?: string[];
 	example?: string;
@@ -59,6 +79,8 @@ type AssertNode = {
 	};
 };
 
+let cbcNoteSeen: boolean;
+
 const parser = new XMLParser({
 	ignoreAttributes: false,
 	removeNSPrefix: true,
@@ -77,14 +99,20 @@ const $defs = {
 	dataTypes: {
 		Amount: {
 			type: 'string',
-			pattern: '^[-+]?(0|[1-9][0-9]*)(.[0-9]{1,2})?$',
+			pattern: '^[-+]?(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$',
+		},
+		// EN 16931 §6.5.3: Unit price amounts allow unlimited decimal places,
+		// unlike regular amounts (§6.5.2, max 2 decimals).
+		UnitPriceAmount: {
+			type: 'string',
+			pattern: '^[-+]?(0|[1-9][0-9]*)(\\.[0-9]+)?$',
 		},
 		'Binary object': {
 			type: 'string',
 			// This is maybe too restrictive because it does not allow whitespace
 			// but this should be okay for our purposes.
 			pattern:
-				'^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)$',
+				'^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
 		},
 		Date: {
 			type: 'string',
@@ -92,13 +120,12 @@ const $defs = {
 		},
 		Percentage: {
 			type: 'string',
-			// FIXME! The ZUGFeRD documentation states that a percentage must have
-			// a maximum of 4 decimal digts. Is that correct?
-			pattern: '^[-+]?(0|[1-9][0-9]*)(.[0-9]{1,4})?$',
+			// EN 16931 §6.5.5: unlimited decimal places for percentages.
+			pattern: '^[-+]?(0|[1-9][0-9]*)(\\.[0-9]+)?$',
 		},
 		Quantity: {
 			type: 'string',
-			pattern: '^[-+]?(0|[1-9][0-9]*)(.[0-9]+)?$',
+			pattern: '^[-+]?(0|[1-9][0-9]*)(\\.[0-9]+)?$',
 		},
 	},
 };
@@ -107,6 +134,7 @@ const outputDocs = process.argv.length === 3 && process.argv[2] === '--docs';
 
 const codeListDir = 'peppol-bis-invoice-3/structure/codelist';
 loadCodeLists(codeListDir);
+patchCodeLists();
 
 const rulesDir = 'peppol-bis-invoice-3/rules/sch';
 loadRules(rulesDir);
@@ -168,18 +196,18 @@ function printDocs(tree: Element) {
 }
 
 function printElement(element: Element, path: string[]) {
-	let term = '/' + element.Term;
+	let term = '/' + element['Term'];
 	if (path.length) {
 		term = '/' + path.join('/') + term;
 	}
 
-	const name = element.Name ? ` (**${element.Name}**)` : '';
+	const name = element['Name'] ? ` (**${element['Name']}**)` : '';
 	let headline: string;
 
-	if (element.Term.includes('@')) {
+	if (element['Term'].includes('@')) {
 		// Attribute of the last element.
 		const attribute = term.replace(/.*@/, '@');
-		const attrCardinality = element.cardinality?.startsWith('0')
+		const attrCardinality = element['cardinality']?.startsWith('0')
 			? 'Optional'
 			: 'Mandatory';
 
@@ -191,44 +219,44 @@ function printElement(element: Element, path: string[]) {
 
 		headline = '####';
 
-		if (element.cardinality) {
-			console.log(`Cardinality: ${element.cardinality}\n`);
+		if (element['cardinality']) {
+			console.log(`Cardinality: ${element['cardinality']}\n`);
 		}
 	}
 
-	if (element.Description) {
-		console.log(element.Description + '\n');
+	if (element['Description']) {
+		console.log(element['Description'] + '\n');
 	}
 
-	if (element.BusinessTerms?.length) {
-		console.log(`Business Terms: ${element.BusinessTerms.join(', ')}\n`);
+	if (element['BusinessTerms']?.length) {
+		console.log(`Business Terms: ${element['BusinessTerms'].join(', ')}\n`);
 	}
 
 	if (Object.prototype.hasOwnProperty.call(element, 'example')) {
-		console.log(`Example value: ${element.example}\n`);
+		console.log(`Example value: ${element['example']}\n`);
 	}
 
 	if (Object.prototype.hasOwnProperty.call(element, 'default')) {
-		console.log(`Default value: ${element.default}\n`);
+		console.log(`Default value: ${element['default']}\n`);
 	}
 
 	if (Object.prototype.hasOwnProperty.call(element, 'fixed')) {
-		console.log(`Fixed value: ${element.fixed}\n`);
+		console.log(`Fixed value: ${element['fixed']}\n`);
 	}
 
-	if (element.CodeList) {
+	if (element['CodeList']) {
 		console.log(`${headline} Code Lists (allowed values)\n`);
 
-		element.CodeList.forEach(cl => {
+		element['CodeList'].forEach(cl => {
 			console.log(`* ${cl}`);
 		});
 
 		console.log('\n');
 	}
 
-	if (element.rules) {
+	if (element['rules']) {
 		console.log(`${headline} Business Rules\n`);
-		element.rules.forEach(ruleId => {
+		element['rules'].forEach(ruleId => {
 			if (ruleId in rules) {
 				const rule = rules[ruleId];
 				console.log(
@@ -240,10 +268,10 @@ function printElement(element: Element, path: string[]) {
 		console.log('\n');
 	}
 
-	if (element.children) {
-		for (let i = 0; i < element.children.length; ++i) {
-			path.push(element.Term);
-			printElement(element.children[i], path);
+	if (element['children']) {
+		for (let i = 0; i < element['children'].length; ++i) {
+			path.push(element['Term']);
+			printElement(element['children'][i], path);
 			path.pop();
 		}
 	}
@@ -256,6 +284,9 @@ function patchSchema(schema: JSONSchemaType<object>) {
 	patchSchemaImpliedFields(schema);
 	patchSchemaForDocumentTypeCodes(schema);
 	patchSchemaForEAS(schema);
+	patchSchemaForEndpointID(schema);
+	patchSchemaForUnitPriceAmount(schema);
+	patchSchemaForNotes(schema);
 }
 
 function patchSchemaImpliedFields(schema: JSONSchemaType<object>) {
@@ -298,6 +329,65 @@ function patchSchemaForEAS(schema: JSONSchemaType<object>) {
 	);
 }
 
+function patchSchemaForEndpointID(schema: JSONSchemaType<object>) {
+	// The endpoint ID is mandatory in UBL but optional in CII. We patch it
+	// to be optional in the schema and enforce it for UBL later, see
+	// https://github.com/gflohr/e-invoice-eu/issues/331
+	const customerParty =
+		schema.properties['ubl:Invoice'].properties[
+			'cac:AccountingCustomerParty'
+		].properties['cac:Party'];
+	customerParty.required = customerParty.required.filter(
+		prop => prop != 'cbc:EndpointID',
+	);
+	const supplierParty =
+		schema.properties['ubl:Invoice'].properties[
+			'cac:AccountingSupplierParty'
+		].properties['cac:Party'];
+	supplierParty.required = supplierParty.required.filter(
+		prop => prop != 'cbc:EndpointID',
+	);
+}
+
+function patchSchemaForUnitPriceAmount(schema: JSONSchemaType<object>) {
+	// EN 16931 §6.5.3 defines a UnitPriceAmount type with unlimited decimal
+	// places for item prices (BT-146, BT-147, BT-148). The PEPPOL BIS source
+	// XML uses the generic "Amount" type for these fields, which is limited
+	// to 2 decimal places (§6.5.2). The schematron rules (BR-DEC-*) only
+	// enforce 2-decimal precision on totals and tax amounts, not on unit
+	// prices — confirming the standard's intent.
+	const priceProps =
+		schema.properties['ubl:Invoice'].properties['cac:InvoiceLine'].items
+			.properties['cac:Price'].properties;
+
+	// BT-146: Item net price
+	priceProps['cbc:PriceAmount'].$ref = '#/$defs/dataTypes/UnitPriceAmount';
+
+	// BT-147 and BT-148 live inside Price/AllowanceCharge
+	const acProps = priceProps['cac:AllowanceCharge'].properties;
+
+	// BT-147: Item price discount
+	acProps['cbc:Amount'].$ref = '#/$defs/dataTypes/UnitPriceAmount';
+
+	// BT-148: Item gross price
+	acProps['cbc:BaseAmount'].$ref = '#/$defs/dataTypes/UnitPriceAmount';
+}
+
+function patchSchemaForNotes(schema: JSONSchemaType<object>) {
+	const noteSchema = structuredClone(
+		schema.properties['ubl:Invoice'].properties['cbc:Note'],
+	);
+	schema.properties['ubl:Invoice'].properties['cbc:Note'] = {
+		anyOf: [noteSchema, noteSchema.items],
+	};
+	const subjectCodeSchema = structuredClone(
+		schema.properties['ubl:Invoice'].properties['x-cii:SubjectCode'],
+	);
+	schema.properties['ubl:Invoice'].properties['x-cii:SubjectCode'] = {
+		anyOf: [subjectCodeSchema, subjectCodeSchema.items],
+	};
+}
+
 /**
  * We treat attributes for an element `cxy:SomeElement` like regular elements
  * with a name `cxy:SomeElement@attributeName`.  However, because of the way
@@ -307,27 +397,30 @@ function patchSchemaForEAS(schema: JSONSchemaType<object>) {
  *
  * @param element the nested data structure
  */
-function sortAttributes(element: { [key: string]: any }) {
+function sortAttributes(element: ExpandObject) {
 	if (typeof element === 'object') {
 		for (const key in element) {
 			sortAttributes(element[key]);
 
 			if (key === 'children') {
-				const sorted = [];
+				const sorted: ExpandObject[] = [];
 
-				const attributes = element.children
+				const attributes = element['children']
 					.filter((child: { Term: string | string[] }) =>
 						child.Term.includes('@'),
 					)
 					.reduce(
-						(acc: { [x: string]: any }, child: { Term: string | number }) => {
+						(
+							acc: ExpandObject,
+							child: { Term: string | number },
+						) => {
 							acc[child.Term] = child;
 							return acc;
 						},
-						{} as { [key: string]: any },
+						{} as ExpandObject,
 					);
 
-				for (const child of element.children) {
+				for (const child of element['children']) {
 					if (child.Term.includes('@')) {
 						continue;
 					}
@@ -340,7 +433,7 @@ function sortAttributes(element: { [key: string]: any }) {
 					}
 				}
 
-				element.children = sorted;
+				element['children'] = sorted;
 			}
 		}
 	}
@@ -360,34 +453,37 @@ function sortAttributes(element: { [key: string]: any }) {
  *
  * @param schema the schema to fix
  */
-function fixupAttributes(node: { [key: string]: any }) {
+function fixupAttributes(node: ExpandObject) {
 	if (typeof node === 'object') {
 		for (const key in node) {
-			if (key === 'type' && node.type === 'object') {
-				const attributes = Object.keys(node.properties).filter(prop =>
-					prop.includes('@'),
+			if (key === 'type' && node['type'] === 'object') {
+				const attributes = Object.keys(node['properties']).filter(
+					prop => prop.includes('@'),
 				);
-				const required: Array<string> = 'required' in node ? node.required : [];
+				const required: Array<string> =
+					'required' in node ? node.required : [];
 
 				if (attributes.length) {
-					node.dependentRequired = {};
+					node['dependentRequired'] = {};
 					const mandatoryAttributes = required.filter(prop =>
 						prop.includes('@'),
 					);
 
 					for (const attribute of mandatoryAttributes) {
 						const elem = attribute.split('@')[0];
-						node.dependentRequired[elem] ??= [];
-						node.dependentRequired[elem].push(attribute);
+						node['dependentRequired'][elem] ??= [];
+						node['dependentRequired'][elem].push(attribute);
 					}
 
 					for (const attribute of attributes) {
 						const elem = attribute.split('@')[0];
-						node.dependentRequired[attribute] = [elem];
+						node['dependentRequired'][attribute] = [elem];
 					}
 
 					if ('required' in node) {
-						node.required = required.filter(prop => !prop.includes('@'));
+						node.required = required.filter(
+							prop => !prop.includes('@'),
+						);
 					}
 				}
 			}
@@ -397,22 +493,25 @@ function fixupAttributes(node: { [key: string]: any }) {
 	}
 }
 
-function buildTree(element: any, parent: any = null): Element {
+function buildTree(
+	element: XmlNode[],
+	parent: ExpandObject | null = null,
+): Element {
 	const tree: Element = {} as Element;
 
 	for (const node of element) {
 		if (typeof node === 'object') {
 			if ('Term' in node) {
-				tree.Term = node.Term[0]['#text'];
+				tree.Term = node.Term![0]['#text'];
 			} else if ('Name' in node) {
-				tree.Name = node.Name[0]['#text'];
+				tree.Name = node.Name![0]['#text'];
 			} else if ('Description' in node) {
-				tree.Description = node.Description[0]['#text'];
+				tree.Description = node.Description![0]['#text'];
 			} else if ('DataType' in node) {
-				tree.DataType = node.DataType[0]['#text'];
+				tree.DataType = node.DataType![0]['#text'];
 			} else if ('Reference' in node && ':@' in node) {
-				const refType = node[':@']['@_type'];
-				const value = node.Reference?.[0]?.['#text'];
+				const refType = node[':@']!['@_type'];
+				const value = node.Reference?.[0]?.['#text'] as string;
 				if ('CODE_LIST' === refType) {
 					tree.CodeList ??= [];
 					tree.CodeList.push(value);
@@ -426,18 +525,18 @@ function buildTree(element: any, parent: any = null): Element {
 					console.error(`Unknown reference type ${refType}`);
 				}
 			} else if ('Attribute' in node) {
-				const attribute = buildTree(node.Attribute);
+				const attribute = buildTree(node.Attribute!);
 				attribute.Term = `${tree.Term}@${attribute.Term}`;
-				parent.children.push(attribute);
+				parent!['children'].push(attribute);
 				if (
 					':@' in node &&
-					'@_usage' in node[':@'] &&
+					'@_usage' in node[':@']! &&
 					node[':@']['@_usage'] === 'Optional'
 				) {
 					attribute.cardinality = '0..1';
 				}
 			} else if ('Value' in node) {
-				const valueType = node[':@']['@_type'];
+				const valueType = node[':@']!['@_type'];
 				const value = node.Value?.[0]?.['#text'];
 
 				if (valueType === 'EXAMPLE') {
@@ -451,9 +550,9 @@ function buildTree(element: any, parent: any = null): Element {
 				}
 			} else if ('Element' in node) {
 				tree.children ??= [];
-				const newElement = buildTree(node.Element, tree);
+				const newElement = buildTree(node.Element as XmlNode[], tree);
 				tree.children.push(newElement);
-				if (':@' in node && '@_cardinality' in node[':@']) {
+				if (':@' in node && '@_cardinality' in node[':@']!) {
 					let cardinality = node[':@']['@_cardinality'];
 					if (
 						newElement.Term === 'cbc:Note' &&
@@ -474,6 +573,8 @@ function buildTree(element: any, parent: any = null): Element {
 }
 
 function buildSchema(tree: Element): JSONSchemaType<object> {
+	cbcNoteSeen = false;
+
 	const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
 
 	const result = {
@@ -486,7 +587,7 @@ function buildSchema(tree: Element): JSONSchemaType<object> {
 		$defs,
 	};
 
-	(result.properties as { [key: string]: any })[tree.Term] = processNode(tree);
+	(result.properties as ExpandObject)[tree.Term] = processNode(tree);
 
 	if (parseCardinality(tree.cardinality).min === 1) {
 		(result.required as unknown as string[]).push(tree.Term);
@@ -504,14 +605,18 @@ function processNode(node: Element): JSONSchemaType<object> {
 		common.title = (node.Name as string).replace(/[ \t\n]+/g, ' ');
 	}
 	if ('Description' in node) {
-		common.description = (node.Description as string).replace(/[ \t\n]+/g, ' ');
+		common.description = (node.Description as string).replace(
+			/[ \t\n]+/g,
+			' ',
+		);
 	}
 
 	if ('BusinessTerms' in node) {
-		common.description += '\nBusiness terms: ' + node.BusinessTerms?.join(', ');
+		common.description +=
+			'\nBusiness terms: ' + node.BusinessTerms?.join(', ');
 	}
 
-	let schema: JSONSchemaType<any>;
+	let schema: JSONSchemaType<unknown>;
 
 	if (node.CodeList) {
 		if (node.CodeList.length > 1) {
@@ -530,15 +635,18 @@ function processNode(node: Element): JSONSchemaType<object> {
 				type: 'string',
 				$ref: `#/$defs/codeLists/${node.CodeList[0]}`,
 				...common,
-			};
+			} as unknown as JSONSchemaType<unknown>;
 		}
 	} else if (node.DataType && node.DataType in $defs.dataTypes) {
 		schema = {
 			$ref: `#/$defs/dataTypes/${node.DataType}`,
 			...common,
-		} as JSONSchemaType<any>;
+		} as JSONSchemaType<unknown>;
 	} else {
-		schema = { type: 'string', ...common };
+		schema = {
+			type: 'string',
+			...common,
+		} as unknown as JSONSchemaType<unknown>;
 	}
 
 	// If the node has children, it's an object with properties
@@ -551,6 +659,10 @@ function processNode(node: Element): JSONSchemaType<object> {
 			if (parseCardinality(child.cardinality).min === 1) {
 				required.push(child.Term);
 			}
+			if (child.Term === 'cbc:Note' && !cbcNoteSeen) {
+				cbcNoteSeen = true;
+				insertBT21(properties);
+			}
 		});
 
 		schema = {
@@ -558,7 +670,7 @@ function processNode(node: Element): JSONSchemaType<object> {
 			additionalProperties: false,
 			...common,
 			properties,
-		} as JSONSchemaType<any>;
+		} as unknown as JSONSchemaType<unknown>;
 
 		if (required.length) {
 			schema.required = required;
@@ -571,7 +683,7 @@ function processNode(node: Element): JSONSchemaType<object> {
 		schema = {
 			type: 'array',
 			items: schema,
-		};
+		} as unknown as JSONSchemaType<unknown>;
 		if (min > 0) {
 			schema.minItems = min;
 		}
@@ -583,7 +695,16 @@ function processNode(node: Element): JSONSchemaType<object> {
 	return schema as JSONSchemaType<object>;
 }
 
-function readXml(parser: XMLParser, filename: string): any {
+function insertBT21(properties: Record<string, JSONSchemaType<object>>): void {
+	properties['x-cii:SubjectCode'] = {
+		type: 'array',
+		items: { $ref: '#/$defs/codeLists/UNCL4451' },
+		title: 'Invoice note qualification code',
+		description: 'The qualification of the invoice note (BT-21)',
+	} as JSONSchemaType<object>;
+}
+
+function readXml(parser: XMLParser, filename: string): ExpandObject {
 	const xml = fs.readFileSync(filename);
 	const document = parser.parse(xml);
 	if (typeof document[0] === 'object' && '?xml' in document[0]) {
@@ -594,7 +715,7 @@ function readXml(parser: XMLParser, filename: string): any {
 	return data;
 }
 
-function resolveStructure(parser: XMLParser, data: any): any {
+function resolveStructure(parser: XMLParser, data: ExpandObject): ExpandObject {
 	if (typeof data === 'object') {
 		for (const key in data) {
 			const child = data[key];
@@ -634,6 +755,7 @@ function loadCodeLists(dir: string) {
 	const pattern = new RegExp('.+\.xml$');
 	const filenames = fs
 		.readdirSync(dir)
+		.sort()
 		.filter(filename => pattern.test(filename))
 		.filter(filename => !filename.match(/\/UNCL1001-(?:cn|inv)\.xml$/))
 		.map(filename => path.join(dir, filename));
@@ -647,11 +769,12 @@ function loadCodeLists(dir: string) {
 	}
 
 	loadUNCL1001();
+	loadUNCL4451();
 }
 
 function loadUNCL1001() {
 	const filename = path.resolve(
-		__dirname,
+		import.meta.dirname,
 		'../../../contrib/code-lists/UNTDID1001.csv',
 	);
 
@@ -683,7 +806,9 @@ function loadUNCL1001() {
 		} else if (row['EN16931 interpretation'] === 'Invoice') {
 			codeListValues['UNCL1001-inv'].push(value);
 		} else {
-			throw new Error(`Unknown EN16931 interpretation: ${row['EN16931 interpretation']}`);
+			throw new Error(
+				`Unknown EN16931 interpretation: ${row['EN16931 interpretation']}`,
+			);
 		}
 	}
 
@@ -700,10 +825,45 @@ function loadUNCL1001() {
 	$defs.codeLists['UNCL1001-cn'] = { enum: cnCodes };
 }
 
+function loadUNCL4451() {
+	const filename = path.resolve(
+		import.meta.dirname,
+		'../../../contrib/code-lists/UNTDID4451.csv',
+	);
+
+	const workbook = XLSX.read(fs.readFileSync(filename), {
+		type: 'buffer',
+		cellDates: true,
+	});
+	const rows = XLSX.utils.sheet_to_json(workbook.Sheets.Sheet1, {
+		defval: null,
+	});
+
+	codeListValues['UNCL4451'] = [];
+
+	type Row = {
+		Code: string;
+		'Code Name': string;
+	};
+
+	const codes: string[] = [];
+	for (const row of rows as Row[]) {
+		const value: CodeListValue = {
+			Id: row.Code,
+			Name: row['Code Name'],
+		};
+
+		codeListValues['UNCL4451'].push(value);
+		codes.push(row.Code);
+	}
+
+	$defs.codeLists['UNCL4451'] = { enum: codes };
+}
+
 function loadCodeList(parser: XMLParser, filename: string) {
 	const data = readXml(parser, filename);
-	const id = data.CodeList.Identifier;
-	let codeElements: Array<CodeListValue> = data.CodeList.Code;
+	const id = data['CodeList'].Identifier;
+	let codeElements: Array<CodeListValue> = data['CodeList'].Code;
 	if (!Array.isArray(codeElements)) {
 		codeElements = [codeElements];
 	}
@@ -722,6 +882,7 @@ function loadRules(dir: string) {
 	const pattern = new RegExp('.+-UBL\.sch$');
 	const filenames = fs
 		.readdirSync(dir)
+		.sort()
 		.filter(filename => pattern.test(filename))
 		.map(filename => path.join(dir, filename));
 
@@ -775,4 +936,23 @@ function loadRule(parser: XMLParser, filename: string) {
 			});
 		}
 	});
+}
+
+function patchCodeLists() {
+	// UBL and CII use different code lists.
+	codeLists['UNCL2005'].enum.push('5', '29', '72');
+	codeListValues['UNCL2005'].push(
+		{
+			Id: '5',
+			Name: 'Invoice document issue date time (CII)',
+		},
+		{
+			Id: '29',
+			Name: 'Delivery date/time actual (CII)',
+		},
+		{
+			Id: '72',
+			Name: 'Paid to date (CII)',
+		},
+	);
 }
