@@ -828,6 +828,29 @@ export const cacAccountingCustomerParty: Transformation[] = [
 	},
 ];
 
+export const cacTaxRepresentativeParty: Transformation[] = [
+	{
+		type: 'string',
+		src: ['cac:PartyName', 'cbc:Name'],
+		dest: ['ram:Name'],
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'object',
+		src: ['cac:PostalAddress'],
+		dest: ['ram:PostalTradeAddress'],
+		children: cacPostalAddress,
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'object',
+		src: ['cac:PartyTaxScheme'],
+		dest: ['ram:SpecifiedTaxRegistration'],
+		children: cacPartyTaxScheme,
+		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+];
+
 export const cacAdditionalDocumentReference: Transformation[] = [
 	{
 		type: 'string',
@@ -1121,6 +1144,19 @@ export const cacTaxSubtotal: Transformation[] = [
 		src: ['cac:TaxCategory', 'cbc:TaxExemptionReasonCode'],
 		dest: ['ram:ExemptionReasonCode'],
 		fxProfileMask: FX_MASK_BASIC_WL,
+	},
+	{
+		type: 'string',
+		subtype: 'DateTimeString',
+		src: ['..', '..', 'cbc:TaxPointDate'],
+		dest: ['ram:TaxPointDate', 'udt:DateString'],
+		fxProfileMask: FX_MASK_EN16931,
+	},
+	{
+		type: 'string',
+		src: ['..', '..', 'cbc:TaxPointDate', 'fixed:102'],
+		dest: ['ram:TaxPointDate', 'udt:DateString@format'],
+		fxProfileMask: FX_MASK_EN16931,
 	},
 	{
 		type: 'string',
@@ -1437,6 +1473,16 @@ export const ublInvoice: Transformation = {
 					fxProfileMask: FX_MASK_MINIMUM,
 				},
 				{
+					type: 'object',
+					src: ['cac:TaxRepresentativeParty'],
+					dest: [
+						'ram:ApplicableHeaderTradeAgreement',
+						'ram:SellerTaxRepresentativeTradeParty',
+					],
+					children: cacTaxRepresentativeParty,
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
+				{
 					type: 'string',
 					src: ['cac:OrderReference', 'cbc:SalesOrderID'],
 					dest: [
@@ -1731,6 +1777,21 @@ export class FormatCIIService
 			if (reference['cbc:DocumentTypeCode'] !== '130') {
 				delete reference['cbc:ID@schemeID'];
 			}
+		}
+
+		// UBL has a dedicated element for the tender or lot reference (BT-17).
+		// CII writes it as an additional referenced document with the code 50
+		// (price/sales catalogue response).
+		const tenderReference =
+			invoice['ubl:Invoice']['cac:OriginatorDocumentReference']?.[
+				'cbc:ID'
+			];
+		if (typeof tenderReference !== 'undefined') {
+			invoice['ubl:Invoice']['cac:AdditionalDocumentReference'] = [
+				...(invoice['ubl:Invoice']['cac:AdditionalDocumentReference'] ??
+					[]),
+				{ 'cbc:ID': tenderReference, 'cbc:DocumentTypeCode': '50' },
+			];
 		}
 	}
 

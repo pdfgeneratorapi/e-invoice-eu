@@ -107,6 +107,48 @@ const cases: MappingCase[] = [
 		expected:
 			/<ram:SpecifiedTradePaymentTerms>\s*<ram:Description>TERMS-20<\/ram:Description>/,
 	},
+	{
+		term: 'BT-7 value added tax point date',
+		level: Level.EN16931,
+		data: { 'cbc:TaxPointDate': '2026-10-20' },
+		marker: '20261020',
+		expected:
+			/<ram:ApplicableTradeTax>[\s\S]*<ram:CategoryCode>S<\/ram:CategoryCode>\s*<ram:TaxPointDate>\s*<udt:DateString format="102">20261020<\/udt:DateString>\s*<\/ram:TaxPointDate>\s*<ram:RateApplicablePercent>19<\/ram:RateApplicablePercent>/,
+	},
+	{
+		term: 'BG-11 seller tax representative party',
+		level: Level.BasicWL,
+		data: {
+			'cac:OrderReference': { 'cbc:ID': 'PO-4711' },
+			'cac:TaxRepresentativeParty': {
+				'cac:PartyName': { 'cbc:Name': 'TAXREP-62' },
+				'cac:PostalAddress': {
+					'cbc:StreetName': 'Rep Street 1',
+					'cbc:CityName': 'Hamburg',
+					'cbc:PostalZone': '20095',
+					'cac:Country': { 'cbc:IdentificationCode': 'DE' },
+				},
+				'cac:PartyTaxScheme': {
+					'cbc:CompanyID': 'DE987654321',
+					'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+				},
+			},
+		},
+		marker: 'TAXREP-62',
+		expected:
+			/<\/ram:BuyerTradeParty>\s*<ram:SellerTaxRepresentativeTradeParty>\s*<ram:Name>TAXREP-62<\/ram:Name>\s*<ram:PostalTradeAddress>\s*<ram:PostcodeCode>20095<\/ram:PostcodeCode>\s*<ram:LineOne>Rep Street 1<\/ram:LineOne>\s*<ram:CityName>Hamburg<\/ram:CityName>\s*<ram:CountryID>DE<\/ram:CountryID>\s*<\/ram:PostalTradeAddress>\s*<ram:SpecifiedTaxRegistration>\s*<ram:ID schemeID="VA">DE987654321<\/ram:ID>\s*<\/ram:SpecifiedTaxRegistration>\s*<\/ram:SellerTaxRepresentativeTradeParty>\s*<ram:BuyerOrderReferencedDocument>/,
+	},
+	{
+		term: 'BT-17 tender or lot reference',
+		level: Level.EN16931,
+		data: {
+			'cac:OriginatorDocumentReference': { 'cbc:ID': 'TENDER-17' },
+			'cac:AdditionalDocumentReference': [{ 'cbc:ID': 'SUPPORTING-122' }],
+		},
+		marker: 'TENDER-17',
+		expected:
+			/<ram:AdditionalReferencedDocument>\s*<ram:IssuerAssignedID>SUPPORTING-122<\/ram:IssuerAssignedID>\s*<ram:TypeCode>916<\/ram:TypeCode>\s*<\/ram:AdditionalReferencedDocument>\s*<ram:AdditionalReferencedDocument>\s*<ram:IssuerAssignedID>TENDER-17<\/ram:IssuerAssignedID>\s*<ram:TypeCode>50<\/ram:TypeCode>\s*<\/ram:AdditionalReferencedDocument>/,
+	},
 ];
 
 const render = async (
@@ -148,6 +190,8 @@ const render = async (
 	} as unknown as Invoice;
 
 	const service = new Service({} as unknown as Logger);
+	service.patchInvoice(invoice);
+	service.fillInvoiceDefaults(invoice);
 
 	return (await service.generate(invoice, {
 		format,
