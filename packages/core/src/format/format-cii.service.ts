@@ -973,12 +973,6 @@ export const cacDelivery: Transformation[] = [
 	},
 	{
 		type: 'string',
-		src: ['cac:DespatchDocumentReference', 'cbc:ID'],
-		dest: ['ram:DespatchAdviceReferencedDocument', 'ram:IssuerAssignedID'],
-		fxProfileMask: FX_MASK_BASIC_WL,
-	},
-	{
-		type: 'string',
 		src: ['cbc:ActualDeliveryDate'],
 		dest: [
 			'ram:ActualDeliverySupplyChainEvent',
@@ -1490,7 +1484,7 @@ export const ublInvoice: Transformation = {
 						'ram:SpecifiedProcuringProject',
 						'ram:ID',
 					],
-					fxProfileMask: FX_MASK_EXTENDED,
+					fxProfileMask: FX_MASK_EN16931,
 				},
 				// CII requires both an ID and a name but UBL only defines the
 				// ID.
@@ -1502,7 +1496,7 @@ export const ublInvoice: Transformation = {
 						'ram:SpecifiedProcuringProject',
 						'ram:Name',
 					],
-					fxProfileMask: FX_MASK_EXTENDED,
+					fxProfileMask: FX_MASK_EN16931,
 				},
 				{
 					type: 'object',
@@ -1511,14 +1505,27 @@ export const ublInvoice: Transformation = {
 					children: cacDelivery,
 					fxProfileMask: FX_MASK_MINIMUM,
 				},
+				// The despatch and receiving advice references are top-level
+				// elements in UBL but follow the delivery details in CII.
+				{
+					type: 'string',
+					src: ['cac:DespatchDocumentReference', 'cbc:ID'],
+					dest: [
+						'ram:ApplicableHeaderTradeDelivery',
+						'ram:DespatchAdviceReferencedDocument',
+						'ram:IssuerAssignedID',
+					],
+					fxProfileMask: FX_MASK_BASIC_WL,
+				},
 				{
 					type: 'string',
 					src: ['cac:ReceiptDocumentReference', 'cbc:ID'],
 					dest: [
+						'ram:ApplicableHeaderTradeDelivery',
 						'ram:ReceivingAdviceReferencedDocument',
 						'ram:IssuerAssignedID',
 					],
-					fxProfileMask: FX_MASK_BASIC_WL,
+					fxProfileMask: FX_MASK_EN16931,
 				},
 				// BT-60 (Payee identifier) is mapped inside cacPayeeParty
 				// as ram:PayeeTradeParty/ram:ID. The previous mapping here
@@ -1598,7 +1605,7 @@ export const ublInvoice: Transformation = {
 						'ram:SpecifiedTradePaymentTerms',
 						'ram:Description',
 					],
-					fxProfileMask: FX_MASK_EN16931,
+					fxProfileMask: FX_MASK_BASIC_WL,
 				},
 				{
 					type: 'string',
