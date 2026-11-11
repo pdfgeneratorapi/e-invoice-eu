@@ -1,20 +1,22 @@
 import { Invoice, Mapping } from '@e-invoice-eu/core';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-jest.mock('../utils/render-spreadsheet', () => ({
-	renderSpreadsheet: jest.fn(
+vi.mock('../utils/render-spreadsheet', () => ({
+	renderSpreadsheet: vi.fn(
 		async () => new Uint8Array([73, 110, 118, 111, 105, 99, 101]),
 	),
 }));
 
-import { FormatUBLService } from './format-ubl.service';
+import { ExpandObject } from 'xmlbuilder2/lib/interfaces';
 import { InvoiceServiceOptions } from '../invoice/invoice.service';
+import { FormatUBLService } from './format-ubl.service';
 
 describe('UBL', () => {
 	let service: FormatUBLService;
 	const mockLogger = {
-		log: jest.fn(),
-		warn: jest.fn(),
-		error: jest.fn(),
+		log: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
 	};
 
 	beforeEach(async () => {
@@ -278,5 +280,75 @@ describe('UBL', () => {
 		await expect(service.generate(invoice, options)).rejects.toThrow(
 			'The attachment buffer is required!',
 		);
+	});
+
+	describe('Extensions for CII', () => {
+		it('should suppress BT-21 for UBL', async () => {
+			const invoice: Invoice = {
+				'ubl:Invoice': {
+					'cbc:Note': ['Please send complaints to devnull@us.com'],
+					'x-cii:SubjectCode': 'AAB',
+				},
+			} as unknown as Invoice;
+
+			const xml = await service.generate(invoice, {
+				format: 'UBL',
+				lang: 'en',
+			});
+			expect(xml).toMatchSnapshot();
+		});
+	});
+
+	describe('post-processing', () => {
+		const defaultNotes = [
+			'Buy a dozen donuts at the Kwik-E-Mart and instantly become' +
+				' Homer-level happy—guaranteed to make your cat ignore you!',
+			"Order Bart's Skateboard Deluxe 3000 from the Simpson Garage" +
+				" because it's the only board that survives a launch over" +
+				" Grandpa's dentures!",
+		];
+
+		const postProcessor = async (data: ExpandObject) => {
+			const document = data['Invoice'] ?? data['CreditNote'];
+			const notes = document['cbc:Note'];
+
+			if (notes) {
+				notes.push(...defaultNotes);
+			} else {
+				document['cbc:Note'] = [...defaultNotes];
+			}
+		};
+
+		it('should append default notes to invoice notes', async () => {
+			const invoice: Invoice = {
+				'ubl:Invoice': {
+					'cbc:ID': '1234567890',
+					'cbc:InvoiceTypeCode': '380',
+					'cbc:Note': ['Please send complaints to devnull@us.com'],
+				},
+			} as unknown as Invoice;
+			const options = {
+				postProcessor,
+			} as InvoiceServiceOptions;
+
+			const xml = await service.generate(invoice, options);
+			expect(xml).toMatchSnapshot();
+		});
+
+		it('should append default notes to credit-note notes', async () => {
+			const invoice: Invoice = {
+				'ubl:Invoice': {
+					'cbc:ID': '1234567890',
+					'cbc:InvoiceTypeCode': '381',
+					'cbc:Note': ['Please send complaints to devnull@us.com'],
+				},
+			} as unknown as Invoice;
+			const options = {
+				postProcessor,
+			} as InvoiceServiceOptions;
+
+			const xml = await service.generate(invoice, options);
+			expect(xml).toMatchSnapshot();
+		});
 	});
 });

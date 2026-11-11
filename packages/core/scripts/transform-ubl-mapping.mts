@@ -2,13 +2,13 @@
 
 import { JSONSchemaType } from 'ajv';
 import * as fs from 'fs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
-import { Invoice } from '../src/invoice/invoice.interface';
+import { Invoice } from '../src/invoice/invoice.interface.js';
 import {
 	mappingValuePattern,
 	sectionReferencePattern,
-} from '../src/mapping/mapping.regex';
+} from '../src/mapping/mapping.regex.js';
 
 if (process.argv.length !== 4) {
 	console.error(`Usage: ${process.argv[1]} INVOICE_SCHEMA MAPPING_SCHEMA`);
@@ -24,11 +24,11 @@ const invoiceSchemaYaml = fs.readFileSync(invoiceSchemaFilename, 'utf-8');
 const invoiceSchema = yaml.load(invoiceSchemaYaml, {
 	filename: invoiceSchemaFilename,
 }) as JSONSchemaType<Invoice>;
-transformSchema(invoiceSchema as JSONSchemaType<any>);
+transformSchema(invoiceSchema as JSONSchemaType<unknown>);
 
 const mappingSchema = {
 	$schema: 'https://json-schema.org/draft/2019-09/schema',
-	$id: `https://www.cantanea.com/schemas/ubl-invoice-schema-v${pkg.version}`,
+	$id: `https://www.cantanea.com/schemas/ubl-mapping-schema-v${pkg.version}`,
 	type: 'object',
 	title: 'Mapping',
 	description: 'Maps invoice data to the cells in a spreadsheet.',
@@ -76,16 +76,23 @@ fs.writeFileSync(
 	JSON.stringify(mappingSchema, null, '\t'),
 );
 
-function transformSchema(schema: JSONSchemaType<any>): void {
+function transformSchema(schema: JSONSchemaType<unknown>): void {
 	// Transform properties if they exist
 	if (schema.properties) {
-		for (const [key, value] of Object.entries(schema.properties)) {
-			// Recursively transform nested schemas
-			transformSchema(value as JSONSchemaType<any>);
+		for (let [key, value] of Object.entries(schema.properties)) {
+			// Recursively transform nested schemas.
+			const maybeMulti = value as Record<string, Array<{ type: string }>>;
+			if (maybeMulti.anyOf?.[0].type === 'array') {
+				// This is for top-level cbc:Note and x-cii:SubjectCode.  They
+				// can be an array or single string, but for mappings, this
+				// does not make sense, and we use only arrays.
+				schema.properties[key] = value = maybeMulti.anyOf[0];
+			}
+			transformSchema(value as JSONSchemaType<unknown>);
 
-			const valueObject = value as Record<string, any>;
+			const valueObject = value as Record<string, unknown>;
 
-			// Update type and references
+			// Update type and references.
 			if (valueObject.type === 'string' || valueObject.$ref) {
 				const defaultValue = schema.properties[key].default;
 				schema.properties[key] = { $ref: '#/$defs/valueRef' };
@@ -101,17 +108,23 @@ function transformSchema(schema: JSONSchemaType<any>): void {
 				} as JSONSchemaType<object>;
 
 				if (valueObject.items) {
-					transformSchema(valueObject.items);
+					transformSchema(
+						valueObject.items as JSONSchemaType<unknown>,
+					);
 					newObject.properties = {
 						section: { $ref: '#/$defs/sectionRef' },
-						...valueObject.items.properties,
+						...valueObject.items['properties'],
 					};
-					newObject.required = [] as unknown as JSONSchemaType<object>;
-					if (valueObject.items.required) {
-						newObject.required.push(...valueObject.items.required);
+					newObject.required =
+						[] as unknown as JSONSchemaType<object>;
+					if (valueObject.items['required']) {
+						newObject.required.push(
+							...valueObject.items['required'],
+						);
 					}
-					if (valueObject.items.dependentRequired) {
-						newObject.dependentRequired = valueObject.items.dependentRequired;
+					if (valueObject.items['dependentRequired']) {
+						newObject.dependentRequired =
+							valueObject.items['dependentRequired'];
 					}
 					delete valueObject.items;
 				}

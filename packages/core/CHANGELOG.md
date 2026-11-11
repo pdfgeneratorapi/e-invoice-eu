@@ -1,0 +1,226 @@
+# @e-invoice-eu/core
+
+## 3.4.3
+
+### Patch Changes
+
+- c1cec97: Write the invoice line object identifier (BT-128) into the CII line trade settlement with its scheme, and write the invoiced object identifier (BT-18) and additional supporting documents (BG-24) to CII at all.
+- 271d4ab: Write price allowances into the gross price, not the net price for CII.
+- da22f17: Add document-level buyer order reference for Factur-X MINIMUM.
+- 5d8215e: All dependencies upgraded to latest.
+
+## 3.4.2
+
+### Patch Changes
+
+- 5a9f555: Relax schema for top-level note elements.
+  
+  The top-level elements `cbc:Note` and `x-cii:SubjectCode` can now either be
+  single string values or arrays of strings.
+- 831f2b9: Upgrade all dependencies to latest.
+- e7e6c90: Nest top-level cbc:Note elements in CII output correctly.
+
+## 3.4.1
+
+### Patch Changes
+
+- 443dfaa: Fix PDF/A output intent.
+  
+  Add number of components in the embedded colour profile.
+- 5077836: Upgrade all dependencies to latest.
+  
+  Exception: TypeScript. TypeScript 7 is still incomptabile with NestJS.
+
+## 3.4.0
+
+### Minor Changes
+
+- 368ee30: Allow overriding invoice metadata.
+  
+  This is only implemented for the library, because it is an experimental
+  feature that will likely vanish in the next major release.
+
+### Patch Changes
+
+- 4dbbbfd: Upgrade all dependencies to latest.
+  
+  Exceptions: TypeScript because of NodeJS and pnpm because of pipeline
+  failures for Windows.
+
+## 3.3.3
+
+No changes in this release.
+
+## 3.3.2
+
+### Patch Changes
+
+- 51ececb: The problem with the Docker publishing is hopefully fixed.
+- 51ececb: All direct dependencies have been updated to latest.
+- cb9f239: upgrade changesets
+
+## 3.3.1
+
+### Patch Changes
+
+- a9aa0e4: escape at-sign in branch trigger
+- 3c6eefa: upgrade all dependencies to latest
+  
+  Exception: TypeScript because of NestJS.
+
+## 3.3.0
+
+### Minor Changes
+
+- 77fffdf: Map creditor reference ID correctly.
+  
+  A supplier or payee party ID with `@schemeID=SEPA` is now mapped to the CII
+  creditor reference ID (BT-90). The payee party ID has precedence over the
+  supplier party ID. If multiple conflicting supplier party `@schemeID=SEPA` are
+  specified, the first one takes precedence.
+
+## 3.2.1
+
+### Patch Changes
+
+- 7c0cb64: Update Docker base image to node:26-alpine.
+- 8074c15: Upgrade all dependencies.
+  
+  Exception: TypeScript. NestJS still does not work with TypeScript 7.
+  Upgrading the TypeScript versions in the other workspaces fails, see
+  https://github.com/nestjs/nest-cli/issues/3549.
+
+## 3.2.0
+
+### Minor Changes
+
+- 938ab61: Allow CII Extensions
+
+  Currently supported, only invoice note subject codes (BT-21) via the special
+  element `x-cii:SubjectCode`.
+
+### Patch Changes
+
+- e77faa0: Use cbc:CompanyLegalForm instead of cbc:LegalForm (see #566).
+- 1566b64: Map invoice period description code to CII.
+- 5f24875: Upgrade all dependencies to latest.
+
+  Exception: TypeScript is not upgrade to version 7, because neither NestJS nor
+  Rollup support TypeScript 7 for the time being. But since TypeScript is a
+  devDependency, this does not affect any users of the software.
+
+- e08d51c: Preserve correct ID, when downgrading ram:GlobalID to ram:ID (#567).
+- 1566b64: Automatically map VAT date codes.
+
+  Whereas UBL uses UNCL 2005, CII uses UNCL 2445. You can use whichever list
+  you prefer. The software will automatically convert the values according to
+  the selected invoice format.
+
+## 3.1.1
+
+### Patch Changes
+
+- d8809ce: Fix homepage URLs.
+- cc349ba: Make Base64 padding optional.
+
+## 3.1.0
+
+### Minor Changes
+
+- f88cd94: Add UnitPriceAmount type for BT-146, BT-147, BT-148
+
+## 3.0.3
+
+### Patch Changes
+
+- 375b34a: Move module type back to esnext.
+
+  Setting `module` and `moduleResolution` to NodeNext broke the build
+  (see #489).
+
+- 109fbbf: Allow post-processing of invoice data before XML is rendered.
+
+  See the API documentation for
+  [`InvoiceServiceOptions`](https://gflohr.github.io/e-invoice-eu/api-docs/types/InvoiceServiceOptions.html#postprocessor).
+
+  It is not planned to port this feature to the command-line tool or the REST
+  API. For those interfaces, you can easily run the generated XML through some
+  XSL stylesheet.
+
+  For the hybrid formats Factur-X resp. ZUGFeRD, this will include an invocation
+  of `pdftk` or a similar tool for extracting the attachment, deleting it, and
+  adding it again.
+
+- e90c3e6: Map seller party identifications to CII.
+
+## 3.0.2
+
+### Patch Changes
+
+- 6a4ddf6: \* ReceivableSpecifiedTradeAccountingAccount no longer placed outside ApplicableHeaderTradeSettlement
+  - Remove @currencyID on Amount elements (forbidden by CII-DT-031)
+  - Fix CII mapping for payee identifier (BT-60)
+
+## 3.0.1
+
+### Patch Changes
+
+- e80b0ca: Map buyer IDs correctly to CII.
+
+  If a `schemeID` attribute is present, it is considered a global ID, otherwise
+  a local ID. This is in line with the id maping of the delivery party.
+
+## 3.0.0
+
+### Major Changes
+
+- 71c08ac: Upgraded code lists and schemas from PEPPOL-UBL to the latest release
+  v3.0.20. This update caused the type VATExemptionReasonCode to be narrowed
+  from string to a literal union.
+
+  This may break TypeScript consumers that relied on arbitrary string values.
+
+  Technically, this is a breaking change and required a major version bump from
+  2 to 3. However, it is highly unlikely, that this will break existing code.
+
+### Patch Changes
+
+- 0f849c6: Factur-X conformance level for price elements fixed
+- 2eb5907: Map referenced invoice for corrected invoices to CII.
+- 0831806: fix encoding of XMP metadata
+
+## 2.3.4
+
+### Patch Changes
+
+- automatic dockerhub publish and bugfixes
+
+## 2.3.3
+
+### Patch Changes
+
+- upgrade dependencies and fix CVEs
+
+## 2.3.2
+
+### Patch Changes
+
+- make customization id overridable
+
+## 2.3.1
+
+### Patch Changes
+
+- fix CII output
+
+## 2.3.1
+
+### Patch Changes
+
+- fix CII output
+
+## 2.4.0
+
+### Minor Changes
+
+- fix CII output

@@ -1,14 +1,14 @@
 import { ErrorObject, ValidationError } from 'ajv/dist/2019';
-
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ValidationService } from '../validation/validation.service';
 import { Invoice } from './invoice.interface';
 import { InvoiceService } from './invoice.service';
-import { ValidationService } from '../validation/validation.service';
 
 describe('InvoiceService', () => {
 	const logger = {
-		log: jest.fn(),
-		warn: jest.fn(),
-		error: jest.fn(),
+		log: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
 	};
 	let service: InvoiceService;
 
@@ -21,7 +21,7 @@ describe('InvoiceService', () => {
 	});
 
 	it('should validate input data and create an invoice', async () => {
-		const validateSpy = jest
+		const validateSpy = vi
 			.spyOn(ValidationService.prototype, 'validate')
 			.mockReturnValue({ 'ubl:Invoice': {} });
 
@@ -45,7 +45,7 @@ describe('InvoiceService', () => {
 	});
 
 	it('should reject invalid input data', async () => {
-		const validateSpy = jest
+		const validateSpy = vi
 			.spyOn(ValidationService.prototype, 'validate')
 			.mockImplementationOnce(() => {
 				// FIXME: Use more specific error here!
@@ -54,17 +54,13 @@ describe('InvoiceService', () => {
 
 		const input = {} as unknown as Invoice;
 
-		try {
-			await service.generate(input, {
+		await expect(
+			service.generate(input, {
 				lang: 'en-us',
 				format: 'UBL',
 				attachments: [],
-			});
-			fail('Expected generate() to throw a ValidationError.');
-		} catch (error) {
-			expect(error).toBeInstanceOf(ValidationError);
-			expect(error.errors).toEqual([]);
-		}
+			}),
+		).rejects.toBeInstanceOf(ValidationError);
 
 		expect(validateSpy).toHaveBeenCalledTimes(1);
 		expect(validateSpy).toHaveBeenCalledWith(
@@ -74,5 +70,78 @@ describe('InvoiceService', () => {
 		);
 
 		validateSpy.mockRestore();
+	});
+
+	describe('Regressions', () => {
+		describe('#569 CII DueDateTypeCode (BT-8) never emitted from cac:InvoicePeriod/cbc:DescriptionCode', () => {
+			const mockLogger = {
+				log: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+			};
+
+			it('should auto-convert the date time code to UBL', async () => {
+				const invoice: Invoice = {
+					'ubl:Invoice': {
+						'cac:InvoicePeriod': {
+							'cbc:DescriptionCode': '72',
+						},
+					},
+				} as Invoice;
+				const invoiceService = new InvoiceService(mockLogger);
+				vi.spyOn(
+					ValidationService.prototype,
+					'validate',
+				).mockReturnValue(invoice);
+
+				const xml = await invoiceService.generate(invoice, {
+					format: 'UBL',
+					lang: 'en',
+				});
+				expect(xml).toContain(
+					'<cbc:DescriptionCode>432</cbc:DescriptionCode>',
+				);
+				expect(xml).toMatchSnapshot();
+			});
+
+			it('should auto-convert the date time code to CII', async () => {
+				const invoice: Invoice = {
+					'ubl:Invoice': {
+						'cac:InvoicePeriod': {
+							'cbc:DescriptionCode': '432',
+						},
+						'cac:TaxTotal': [
+							{
+								'cac:TaxSubtotal': [
+									{
+										'cac:TaxCategory': {
+											'cbc:ID': 'S',
+											'cbc:Percent': '20',
+											'cac:TaxScheme': {
+												'cbc:ID': 'VAT',
+											},
+										},
+									},
+								],
+							},
+						],
+					},
+				} as Invoice;
+				const invoiceService = new InvoiceService(mockLogger);
+				vi.spyOn(
+					ValidationService.prototype,
+					'validate',
+				).mockReturnValue(invoice);
+
+				const xml = await invoiceService.generate(invoice, {
+					format: 'CII',
+					lang: 'en',
+				});
+				expect(xml).toContain(
+					'<ram:DueDateTypeCode>72</ram:DueDateTypeCode>',
+				);
+				expect(xml).toMatchSnapshot();
+			});
+		});
 	});
 });

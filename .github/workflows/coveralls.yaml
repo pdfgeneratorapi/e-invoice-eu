@@ -12,23 +12,25 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
+        uses: pnpm/action-setup@v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Test with coverage
         run: pnpm run test:cov
+
+      - name: Aggregate coverage
+        run: node aggregate-coverage.mjs
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-main
+          path: coverage-summary.json
 
       - name: Upload coverage
         uses: coverallsapp/github-action@v2

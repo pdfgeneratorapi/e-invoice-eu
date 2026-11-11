@@ -1,11 +1,13 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { FormatFactoryService } from './format.factory.service';
 
 describe('XRECHNUNG-UBL', () => {
 	let service: FormatFactoryService;
 	const logger = {
-		log: jest.fn(),
-		warn: jest.fn(),
-		error: jest.fn(),
+		log: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
 	};
 
 	beforeEach(async () => {
@@ -31,7 +33,9 @@ describe('XRECHNUNG-UBL', () => {
 	});
 
 	it('should create an XRECHNUNG-UBL format service', () => {
-		expect(service.createFormatService('XRECHNUNG-UBL', logger)).toBeDefined();
+		expect(
+			service.createFormatService('XRECHNUNG-UBL', logger),
+		).toBeDefined();
 	});
 
 	it('should list all formats alphabetically', () => {

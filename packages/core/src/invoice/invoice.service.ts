@@ -1,10 +1,10 @@
-import Ajv2019, { ValidateFunction } from 'ajv/dist/2019';
-
-import { Invoice } from './invoice.interface';
-import { invoiceSchema } from './invoice.schema';
+import Ajv2019 from 'ajv/dist/2019';
+import { ExpandObject } from 'xmlbuilder2/lib/interfaces';
 import { FormatFactoryService } from '../format/format.factory.service';
 import { Logger } from '../logger.interface';
 import { ValidationService } from '../validation';
+import { Invoice } from './invoice.interface';
+import { invoiceSchema } from './invoice.schema';
 
 /**
  * A container for a file used for an e-invoice.
@@ -34,6 +34,19 @@ export type FileInfo = {
 	 * An optional description.
 	 */
 	description?: string;
+};
+
+/**
+ * Invoice meta data. The values passed here will override the hard-coded
+ * defaults.
+ */
+export type CustomInvoiceMetadata = {
+	author?: string;
+	creator?: string;
+	keywords?: string[];
+	producer?: string;
+	subject?: string;
+	title?: string;
 };
 
 /**
@@ -80,6 +93,92 @@ export type InvoiceServiceOptions = {
 	 * Shut up warnings.
 	 */
 	noWarnings?: boolean;
+
+	/**
+	 * Callback function invoked before the XML is rendered. This
+	 * allows fine-tuning the output XML, for example by adding currently
+	 * unsupported CII elements. Another use case is applying fixes for open
+	 * bugs.
+	 *
+	 * The `data` argument is a plain JavaScript object where all nodes
+	 * are either an `Array` or another object, and all leaves are
+	 * strings. The type `ExpandObject` is defined in `xmlbuilder2`.
+	 *
+	 * UBL example:
+	 *
+	 * ```typescript
+	 * const defaultNotes = [
+	 *	'We only use organic ingredients (no GMO)!',
+	 *	'We work exclusively with regional suppliers.',
+	 * ];
+	 *
+	 * invoiceServiceOptions.postProcessor = async (data: ExpandObject) => {
+	 *	const document = data['Invoice'] ?? data['CreditNote'];
+	 *	const notes = document['cbc:Note'];
+	 *
+	 *	if (notes) {
+	 *		notes.push(...defaultNotes);
+	 *	} else {
+	 *		document['cbc:Note'] = [...defaultNotes];
+	 *	}
+	 * ```
+	 *
+	 * CII example:
+	 *
+	 * ```typescript
+	 * const defaultNotes = [
+	 *	'We only use organic ingredients (no GMO)!',
+	 *	'We work exclusively with regional suppliers.',
+	 * ];
+	 *
+	 * const postProcessor = async (data: ExpandObject) => {
+	 * 	if (
+	 * 		data['rsm:CrossIndustryInvoice']['rsm:ExchangedDocument']![
+	 * 			'ram:IncludedNote'
+	 * 		]
+	 * 	) {
+	 * 		if (
+	 * 			!Array.isArray(
+	 * 				data['rsm:CrossIndustryInvoice']['rsm:ExchangedDocument']![
+	 * 					'ram:IncludedNote'
+	 * 				],
+	 * 			)
+	 * 		) {
+	 * 			data['rsm:CrossIndustryInvoice']['rsm:ExchangedDocument']![
+	 * 				'ram:IncludedNote'
+	 * 			] = [
+	 * 				data['rsm:CrossIndustryInvoice']['rsm:ExchangedDocument']![
+	 * 					'ram:IncludedNote'
+	 * 				],
+	 * 			];
+	 * 		}
+	 * 	} else {
+	 * 		data['rsm:CrossIndustryInvoice']['rsm:ExchangedDocument']![
+	 * 			'ram:IncludedNote'
+	 * 		] = [];
+	 * 	}
+	 * 	const notes =
+	 * 		data['rsm:CrossIndustryInvoice']['rsm:ExchangedDocument'][
+	 * 			'ram:IncludedNote'
+	 * 		];
+	 * 	for (const note of defaultNotes) {
+	 * 		notes.push({ 'ram:Content': note });
+	 * 	}
+	 * };
+	 * ```
+	 */
+	postProcessor?: (data: ExpandObject) => Promise<void>;
+
+	/**
+	 * Only Factur-X/ZUGFeRD! And likely to vanish as soon, as the new XMP
+	 * metadata API is implemented.
+	 *
+	 * Custom invoice metadata. Data specified here will override the
+	 * hardcoded defaults.
+	 *
+	 * @experimental
+	 */
+	customMetadata?: CustomInvoiceMetadata;
 };
 
 /**
@@ -88,7 +187,6 @@ export type InvoiceServiceOptions = {
  */
 export class InvoiceService {
 	private readonly formatFactoryService: FormatFactoryService;
-	private readonly validator: ValidateFunction<Invoice>;
 	private readonly validationService: ValidationService;
 
 	/**
@@ -98,12 +196,6 @@ export class InvoiceService {
 	 */
 	constructor(private readonly logger: Logger) {
 		this.formatFactoryService = new FormatFactoryService();
-		const ajv = new Ajv2019({
-			strict: true,
-			allErrors: true,
-			useDefaults: true,
-		});
-		this.validator = ajv.compile(invoiceSchema);
 		this.validationService = new ValidationService(this.logger);
 	}
 
@@ -130,33 +222,48 @@ export class InvoiceService {
 			input['ubl:Invoice']['cbc:Note'] &&
 			typeof input['ubl:Invoice']['cbc:Note'] === 'string'
 		) {
-			patched['ubl:Invoice']['cbc:Note'] = [input['ubl:Invoice']['cbc:Note']];
-			this.deprecationWarning(options);
+			patched['ubl:Invoice']['cbc:Note'] = [
+				input['ubl:Invoice']['cbc:Note'],
+			];
 		}
 
-		const invoice = this.validationService.validate(
-			'invoice data',
-			this.validator,
-			patched,
-		);
+		if (
+			input['ubl:Invoice'] &&
+			input['ubl:Invoice']['x-cii:SubjectCode'] &&
+			typeof input['ubl:Invoice']['x-cii:SubjectCode'] === 'string'
+		) {
+			patched['ubl:Invoice']['x-cii:SubjectCode'] = [
+				input['ubl:Invoice']['x-cii:SubjectCode'],
+			];
+		}
 
 		const formatter = this.formatFactoryService.createFormatService(
 			options.format,
 			this.logger,
 		);
 
-		options.format = this.formatFactoryService.normalizeFormat(options.format);
+		options.format = this.formatFactoryService.normalizeFormat(
+			options.format,
+		);
 
+		const ajv = new Ajv2019({
+			strict: true,
+			allErrors: true,
+			useDefaults: true,
+		});
+
+		const schema = structuredClone(invoiceSchema);
+		formatter.patchSchema(schema);
+		const validator = ajv.compile(schema);
+		const invoice = this.validationService.validate(
+			'invoice data',
+			validator,
+			patched,
+		);
+
+		formatter.patchInvoice(invoice);
 		formatter.fillInvoiceDefaults(invoice);
 
 		return formatter.generate(invoice, options);
-	}
-
-	private deprecationWarning(options: InvoiceServiceOptions) {
-		if (!options.noWarnings) {
-			console.warn("Coercing 'ubl:Invoice->cbc:Note' from an array into an");
-			console.warn('array of strings. Please change your data resp. mapping!');
-			console.warn('The automatic coercion will be removed in version 3!');
-		}
 	}
 }

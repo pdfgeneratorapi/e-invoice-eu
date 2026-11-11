@@ -4,8 +4,8 @@ import { Textdomain } from '@esgettext/runtime';
 import * as path from 'path';
 import * as v from 'valibot';
 import '@valibot/i18n/de';
-import yargs from 'yargs';
 import type { Arguments, Argv } from 'yargs';
+import yargs from 'yargs';
 
 import { Command } from './command';
 import { Format } from './commands/format';
@@ -21,8 +21,7 @@ const gtx = Textdomain.getInstance('e-einvoice-eu-cli');
 v.setGlobalConfig({ lang: Textdomain.locale });
 const localePath = path.join(__dirname, 'locale');
 gtx.bindtextdomain(localePath);
-gtx
-	.resolve()
+gtx.resolve()
 	.then(async () => {
 		let exitCode = 0;
 		const ulocale = Textdomain.locale.replace('-', '_');
@@ -47,6 +46,7 @@ gtx
 					},
 				),
 			)
+			.version(Package.getVersion())
 			.alias('V', 'version')
 			.alias('h', 'help')
 			.demandCommand(1, gtx._('Error: No command given.'))
@@ -81,10 +81,12 @@ gtx
 		process.exit(exitCode);
 	})
 	.catch((exception: Error) => {
-		console.error(gtx._x('{programName}: unhandled exception: {exception}'), {
-			programName: Package.getName(),
-			exception,
-		});
+		console.error(
+			gtx._x('{programName}: unhandled exception: {exception}', {
+				programName: Package.getName(),
+				exception,
+			}),
+		);
 
 		process.exit(2);
 	});

@@ -3,17 +3,17 @@ import { INestApplication, Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ErrorObject, ValidationError } from 'ajv/dist/2019';
 import request from 'supertest';
-
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FormatFactoryService } from '../format/format.factory.service';
 import { MappingController } from './mapping.controller';
 import { MappingService } from './mapping.service';
-import { FormatFactoryService } from '../format/format.factory.service';
 
 describe('MappingController', () => {
 	let app: INestApplication;
 	let service: MappingService;
 
 	const mockedLogger = {
-		error: jest.fn(),
+		error: vi.fn(),
 	};
 
 	beforeEach(async () => {
@@ -27,7 +27,7 @@ describe('MappingController', () => {
 				{
 					provide: MappingService,
 					useValue: {
-						transform: jest.fn(),
+						transform: vi.fn(),
 					},
 				},
 				{
@@ -39,7 +39,7 @@ describe('MappingController', () => {
 
 		service = module.get<MappingService>(MappingService);
 		app = module.createNestApplication();
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 		await app.init();
 	});
 
@@ -51,8 +51,8 @@ describe('MappingController', () => {
 		const mockTransformedData = {
 			result: 'some transformed data',
 		} as unknown as Invoice;
-		//jest.spyOn(service, 'transform').mockReturnValue(mockTransformedData);
-		jest.spyOn(service, 'transform').mockReturnValue(mockTransformedData);
+
+		vi.spyOn(service, 'transform').mockReturnValue(mockTransformedData);
 
 		const mapping = 'test: data success';
 		const data = 'test data';
@@ -100,7 +100,7 @@ describe('MappingController', () => {
 			params: { type: 'string' },
 			message: 'did not work',
 		};
-		jest.spyOn(service, 'transform').mockImplementation(() => {
+		vi.spyOn(service, 'transform').mockImplementation(() => {
 			throw new ValidationError([error]);
 		});
 
@@ -117,13 +117,17 @@ describe('MappingController', () => {
 	});
 
 	it('should return 500 if an unexpected exception is thrown', async () => {
-		jest.spyOn(service, 'transform').mockImplementation(() => {
+		vi.spyOn(service, 'transform').mockImplementation(() => {
 			throw new Error('boum!');
 		});
 
 		const response = await request(app.getHttpServer())
 			.post('/mapping/transform/UBL')
-			.attach('mapping', Buffer.from('test: data exception'), 'mapping.yaml')
+			.attach(
+				'mapping',
+				Buffer.from('test: data exception'),
+				'mapping.yaml',
+			)
 			.attach('spreadsheet', Buffer.from('test data'), 'test.xlsx');
 
 		expect(response.status).toBe(500);

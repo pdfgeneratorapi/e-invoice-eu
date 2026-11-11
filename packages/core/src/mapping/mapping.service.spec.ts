@@ -1,19 +1,31 @@
 import * as XLSX from '@e965/xlsx';
 import { JSONSchemaType } from 'ajv';
-
-import { MappingService } from './mapping.service';
+import {
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mock,
+	vi,
+} from 'vitest';
+import { ExpandObject } from 'xmlbuilder2/lib/interfaces';
 import { EInvoiceFormat } from '../format';
-import { Mapping, MappingMetaInformation } from './mapping.interface';
 import { FormatFactoryService } from '../format/format.factory.service';
 import { Invoice } from '../invoice';
 import { Logger } from '../logger.interface';
 import { ValidationService } from '../validation';
+import { Mapping, MappingMetaInformation } from './mapping.interface';
+import { MappingService } from './mapping.service';
 
-jest.mock('fs/promises');
-jest.mock('@e965/xlsx', () => ({
-	...jest.requireActual('@e965/xlsx'),
-	read: jest.fn(),
-}));
+vi.mock('fs/promises');
+vi.mock('@e965/xlsx', async () => {
+	const actual = await vi.importActual('@e965/xlsx');
+	return {
+		...actual,
+		read: vi.fn(),
+	};
+});
 
 // Used for testing `transform()`.
 const mapping = {
@@ -161,15 +173,11 @@ const defaultMappingContext = {
 describe('MappingService', () => {
 	let service: MappingService;
 	const logger = {
-		error: jest.fn(),
+		error: vi.fn(),
 	};
 
 	beforeEach(async () => {
 		service = new MappingService(logger as unknown as Logger);
-	});
-
-	afterEach(() => {
-		jest.clearAllMocks();
 	});
 
 	it('should be defined', () => {
@@ -183,11 +191,20 @@ describe('MappingService', () => {
 			} as XLSX.WorkBook;
 
 			try {
-				service['resolveValue']('=Inwoice.A1', {} as JSONSchemaType<any>, {
-					...defaultMappingContext,
-					schemaPath: ['properties', 'ubl:Invoice', 'properties', 'cbc:ID'],
-					workbook: wb,
-				});
+				service['resolveValue'](
+					'=Inwoice.A1',
+					{} as JSONSchemaType<ExpandObject>,
+					{
+						...defaultMappingContext,
+						schemaPath: [
+							'properties',
+							'ubl:Invoice',
+							'properties',
+							'cbc:ID',
+						],
+						workbook: wb,
+					},
+				);
 				throw new Error('no exception thrown');
 			} catch (e) {
 				expect(e).toBeDefined();
@@ -218,10 +235,15 @@ describe('MappingService', () => {
 			} as XLSX.WorkBook;
 			const value = service['resolveValue'](
 				'=ET742',
-				{} as JSONSchemaType<any>,
+				{} as JSONSchemaType<ExpandObject>,
 				{
 					...defaultMappingContext,
-					schemaPath: ['properties', 'ubl:Invoice', 'properties', 'cbc:ID'],
+					schemaPath: [
+						'properties',
+						'ubl:Invoice',
+						'properties',
+						'cbc:ID',
+					],
 					workbook: wb,
 				},
 			);
@@ -244,23 +266,37 @@ describe('MappingService', () => {
 				},
 				SheetNames: ['Invoice'],
 			} as XLSX.WorkBook;
-			const empty = service['resolveValue']('=A1', {} as JSONSchemaType<any>, {
-				...defaultMappingContext,
-				meta: {
-					sectionColumn: {},
-					empty: ['[:empty:]'],
+			const empty = service['resolveValue'](
+				'=A1',
+				{} as JSONSchemaType<ExpandObject>,
+				{
+					...defaultMappingContext,
+					meta: {
+						sectionColumn: {},
+						empty: ['[:empty:]'],
+					},
+					schemaPath: [
+						'properties',
+						'ubl:Invoice',
+						'properties',
+						'cbc:ID',
+					],
+					workbook: wb,
 				},
-				schemaPath: ['properties', 'ubl:Invoice', 'properties', 'cbc:ID'],
-				workbook: wb,
-			});
+			);
 			expect(empty).toBe('');
 
 			const notEmpty = service['resolveValue'](
 				'=A2',
-				{} as JSONSchemaType<any>,
+				{} as JSONSchemaType<ExpandObject>,
 				{
 					...defaultMappingContext,
-					schemaPath: ['properties', 'ubl:Invoice', 'properties', 'cbc:ID'],
+					schemaPath: [
+						'properties',
+						'ubl:Invoice',
+						'properties',
+						'cbc:ID',
+					],
 					workbook: wb,
 				},
 			);
@@ -269,13 +305,19 @@ describe('MappingService', () => {
 
 		it('should throw an exception if a non-existing section is referenced', async () => {
 			const localMapping = structuredClone(mapping);
-			localMapping['ubl:Invoice']['cac:InvoiceLine']['cbc:ID'] = '=:Lines.A1';
-			const mockValidateMapping = jest
-				.spyOn(service as any, 'validateMapping')
+			localMapping['ubl:Invoice']['cac:InvoiceLine']['cbc:ID'] =
+				'=:Lines.A1';
+			const mockValidateMapping = vi
+				.spyOn(
+					service as unknown as {
+						validateMapping: (typeof service)['validateMapping'];
+					},
+					'validateMapping',
+				)
 				.mockReturnValue(localMapping);
 			const buf: Uint8Array = [] as unknown as Uint8Array;
 
-			(XLSX.read as jest.Mock).mockReturnValueOnce(workbook);
+			(XLSX.read as Mock).mockReturnValueOnce(workbook);
 
 			try {
 				service.transform(buf, 'UBL', {} as Mapping);
@@ -308,12 +350,17 @@ describe('MappingService', () => {
 			const localMapping = structuredClone(mapping);
 			localMapping['ubl:Invoice']['cac:InvoiceLine']['section'] =
 				'Infoice:Line';
-			const mockValidateMapping = jest
-				.spyOn(service as any, 'validateMapping')
+			const mockValidateMapping = vi
+				.spyOn(
+					service as unknown as {
+						validateMapping: (typeof service)['validateMapping'];
+					},
+					'validateMapping',
+				)
 				.mockReturnValue(localMapping);
 			const buf: Uint8Array = [] as unknown as Uint8Array;
 
-			(XLSX.read as jest.Mock).mockReturnValueOnce(workbook);
+			(XLSX.read as Mock).mockReturnValueOnce(workbook);
 
 			try {
 				service.transform(buf, 'UBL', {} as Mapping);
@@ -326,7 +373,9 @@ describe('MappingService', () => {
 				expect(e.errors.length).toBe(1);
 
 				const error = e.errors[0];
-				expect(error.instancePath).toBe('/ubl:Invoice/cac:InvoiceLine/section');
+				expect(error.instancePath).toBe(
+					'/ubl:Invoice/cac:InvoiceLine/section',
+				);
 				expect(error.schemaPath).toBe(
 					'#/properties/ubl%3AInvoice/properties/cac%3AInvoiceLine/properties/section',
 				);
@@ -344,12 +393,17 @@ describe('MappingService', () => {
 			const localMapping = structuredClone(mapping);
 			localMapping['ubl:Invoice']['cac:InvoiceLine']['section'] =
 				'Invoice:Lime';
-			const mockValidateMapping = jest
-				.spyOn(service as any, 'validateMapping')
+			const mockValidateMapping = vi
+				.spyOn(
+					service as unknown as {
+						validateMapping: (typeof service)['validateMapping'];
+					},
+					'validateMapping',
+				)
 				.mockReturnValue(localMapping);
 			const buf: Uint8Array = [] as unknown as Uint8Array;
 
-			(XLSX.read as jest.Mock).mockReturnValueOnce(workbook);
+			(XLSX.read as Mock).mockReturnValueOnce(workbook);
 
 			try {
 				service.transform(buf, 'UBL', {} as Mapping);
@@ -362,7 +416,9 @@ describe('MappingService', () => {
 				expect(e.errors.length).toBe(1);
 
 				const error = e.errors[0];
-				expect(error.instancePath).toBe('/ubl:Invoice/cac:InvoiceLine/section');
+				expect(error.instancePath).toBe(
+					'/ubl:Invoice/cac:InvoiceLine/section',
+				);
 				expect(error.schemaPath).toBe(
 					'#/properties/ubl%3AInvoice/properties/cac%3AInvoiceLine/properties/section',
 				);
@@ -377,15 +433,20 @@ describe('MappingService', () => {
 		});
 
 		it('should throw an exception if multiple unbound sections are encountered', async () => {
-			const mockValidateMapping = jest
-				.spyOn(service as any, 'validateMapping')
+			const mockValidateMapping = vi
+				.spyOn(
+					service as unknown as {
+						validateMapping: (typeof service)['validateMapping'];
+					},
+					'validateMapping',
+				)
 				.mockReturnValue(mapping);
 			const buf: Uint8Array = [] as unknown as Uint8Array;
 
 			const localWorkbook = structuredClone(workbook);
 			localWorkbook.Sheets.Invoice.K28 = { t: 's', v: 'SubTotal' };
 
-			(XLSX.read as jest.Mock).mockReturnValueOnce(localWorkbook);
+			(XLSX.read as Mock).mockReturnValueOnce(localWorkbook);
 
 			try {
 				service.transform(buf, 'UBL', {} as Mapping);
@@ -418,21 +479,26 @@ describe('MappingService', () => {
 		// Test the parseMapping() method.
 		it('should validate mappings and fill defaults', () => {
 			const formatter: EInvoiceFormat = {
-				fillMappingDefaults: jest.fn(),
+				fillMappingDefaults: vi.fn(),
 			} as unknown as EInvoiceFormat;
-			const formatFactorySpy = jest
+			const formatFactorySpy = vi
 				.spyOn(FormatFactoryService.prototype, 'createFormatService')
 				.mockReturnValue(formatter);
-			const validateSpy = jest
+			const validateSpy = vi
 				.spyOn(ValidationService.prototype, 'validate')
 				.mockReturnValue({ 'ubl:Invoice': {} });
 
 			const buf: Uint8Array = [] as unknown as Uint8Array;
 
-			(XLSX.read as jest.Mock).mockReturnValueOnce(workbook);
+			(XLSX.read as Mock).mockReturnValueOnce(workbook);
 
-			const mockFillSectionRanges = jest
-				.spyOn(service as any, 'fillSectionRanges')
+			const mockFillSectionRanges = vi
+				.spyOn(
+					service as unknown as {
+						fillSectionRanges: (typeof service)['fillSectionRanges'];
+					},
+					'fillSectionRanges',
+				)
 				.mockImplementationOnce(() => {});
 
 			const invoice = service.transform(buf, 'ZIRKUSFeRD', {} as Mapping);
@@ -461,12 +527,17 @@ describe('MappingService', () => {
 			let invoice: Invoice;
 
 			beforeAll(async () => {
-				const mockValidateMapping = jest
-					.spyOn(service as any, 'validateMapping')
+				const mockValidateMapping = vi
+					.spyOn(
+						service as unknown as {
+							validateMapping: (typeof service)['validateMapping'];
+						},
+						'validateMapping',
+					)
 					.mockReturnValue(mapping);
 				const buf: Uint8Array = [] as unknown as Uint8Array;
 
-				(XLSX.read as jest.Mock).mockReturnValueOnce(workbook);
+				(XLSX.read as Mock).mockReturnValueOnce(workbook);
 
 				invoice = service.transform(buf, 'UBL', {} as Mapping);
 
@@ -484,16 +555,22 @@ describe('MappingService', () => {
 			});
 
 			it('should map a literal date', () => {
-				expect(invoice['ubl:Invoice']['cbc:IssueDate']).toBe('2024-10-21');
+				expect(invoice['ubl:Invoice']['cbc:IssueDate']).toBe(
+					'2024-10-21',
+				);
 			});
 
 			it('should map a date', () => {
-				expect(invoice['ubl:Invoice']['cbc:DueDate']).toBe('2024-10-28');
+				expect(invoice['ubl:Invoice']['cbc:DueDate']).toBe(
+					'2024-10-28',
+				);
 			});
 
 			it('should map a string value', () => {
 				const wanted = workbook.Sheets.Invoice.B1.v;
-				expect(invoice['ubl:Invoice']['cbc:CustomizationID']).toBe(wanted);
+				expect(invoice['ubl:Invoice']['cbc:CustomizationID']).toBe(
+					wanted,
+				);
 			});
 
 			it('should map a quoted literal value', () => {
@@ -503,9 +580,9 @@ describe('MappingService', () => {
 
 			it('should map a nested object property', () => {
 				const wanted = '0815';
-				expect(invoice['ubl:Invoice']['cac:OrderReference']?.['cbc:ID']).toBe(
-					wanted,
-				);
+				expect(
+					invoice['ubl:Invoice']['cac:OrderReference']?.['cbc:ID'],
+				).toBe(wanted);
 			});
 
 			it('should map an array of invoice lines', () => {
@@ -520,7 +597,9 @@ describe('MappingService', () => {
 
 			it('should map allowances charges of invoice line #1', () => {
 				const target =
-					invoice['ubl:Invoice']['cac:InvoiceLine'][0]['cac:AllowanceCharge'];
+					invoice['ubl:Invoice']['cac:InvoiceLine'][0][
+						'cac:AllowanceCharge'
+					];
 				expect(target).toBeDefined();
 				if (typeof target !== 'undefined') {
 					expect(Array.isArray(target)).toBe(true);
@@ -532,13 +611,17 @@ describe('MappingService', () => {
 
 			it('should not map allowances charges of invoice line #2', () => {
 				const target =
-					invoice['ubl:Invoice']['cac:InvoiceLine'][1]['cac:AllowanceCharge'];
+					invoice['ubl:Invoice']['cac:InvoiceLine'][1][
+						'cac:AllowanceCharge'
+					];
 				expect(target).not.toBeDefined();
 			});
 
 			it('should map allowances charges of invoice line #3', () => {
 				const target =
-					invoice['ubl:Invoice']['cac:InvoiceLine'][2]['cac:AllowanceCharge'];
+					invoice['ubl:Invoice']['cac:InvoiceLine'][2][
+						'cac:AllowanceCharge'
+					];
 				expect(target).toBeDefined();
 				if (typeof target !== 'undefined') {
 					expect(Array.isArray(target)).toBe(true);
@@ -588,7 +671,7 @@ describe('MappingService', () => {
 				},
 			} as XLSX.WorkBook;
 
-			const validateSpy = jest
+			const validateSpy = vi
 				.spyOn(ValidationService.prototype, 'validate')
 				.mockReturnValue(mapping);
 

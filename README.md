@@ -5,12 +5,13 @@
 </p>
 
 [![licence](https://img.shields.io/badge/licence-WTFPL-blue)](http://www.wtfpl.net/)
-[![price](https://img.shields.io/badge/price-FREE-green)](https://github.com/gflohr/qgoda/blob/main/LICENSE)
+[![price](https://img.shields.io/badge/price-FREE-green)](https://github.com/gflohr/e-invoice-eu/blob/main/LICENSE)
 [![coverage](https://img.shields.io/coverallsCoverage/github/gflohr/e-invoice-eu?branch=main)](https://coveralls.io/github/gflohr/e-invoice-eu?branch=main)
-[![downloads](https://img.shields.io/npm/dw/%40e-invoice-eu%2Fcore)](https://img.shields.io/npm/dw/%40e-invoice-eu%2Fcore)
+[![downloads](https://img.shields.io/npm/dw/%40e-invoice-eu%2Fcore)](https://www.npmjs.com/package/@e-invoice-eu/core)
 [![documentation](https://img.shields.io/badge/documentation-read-green)](https://gflohr.github.io/e-invoice-eu)
 [![help](https://img.shields.io/badge/help-ask--a--question-green)](https://notebooklm.google.com/notebook/f5783dde-ebe6-4610-bac1-f181fdf45f94)
-[![stand with](https://img.shields.io/badge/stand%20with-Ukraine🇺🇦-ffc107)](https://www.standwithukraineeurope.com/en//)
+[![listed on](https://img.shields.io/badge/listed%20on-awesome--europe-ffcc00?logo=europeanunion&logoColor=ffcc00&labelColor=003399)](https://github.com/GeiserX/awesome-europe#readme)
+[![stand with](https://img.shields.io/badge/stand%20with-Ukraine🇺🇦-ffc107)](https://www.standwithukraineeurope.com/en/)
 
 # E-Invoice-EU<!-- omit from toc -->
 
@@ -25,7 +26,7 @@ JSON with free and open source software.
 - [Documentation](#documentation)
 - [Validation](#validation)
 - [BUGS](#bugs)
-  - [PDF/A](#pdfa)
+	- [PDF/A](#pdfa)
 - [Reporting Bugs](#reporting-bugs)
 - [Copyright](#copyright)
 - [Disclaimer](#disclaimer)
@@ -118,7 +119,7 @@ See [Validation](./contrib/validators) for details.
 A new and very simple option is offered by the sister project to this one,
 [e-invoice-eu-validator](https://github.com/gflohr/e-invoice-eu-validator).
 
-## BUGS
+## Bugs and Caveats
 
 ### PDF/A
 
@@ -128,10 +129,10 @@ PDF/A means.
 
 This library creates PDFs solely with [`pdf-lib`](https://github.com/cantoo-scribe/pdf-lib)
 and does some pretty complicated transformations on the PDF to achieve PDF/A
-compliance. This is not battle tested and may fail.
+compliance. This is not battle-tested and may fail.
 
 If you encounter a PDF that does not meet the PDF/A requirements, please
-open an issue and attach an anonymized version of the PDF. What you can do
+open an issue and attach an anonymised version of the PDF. What you can do
 in the meantime:
 
 - If you have [GhostScript](https://www.ghostscript.com/) installed, convert the PDF to PDF/A with this command: `gs -dVERBOSE -dPDFA=3 -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -sOutputFile=OUTPUT_FILE.pdf PDFA_def.ps INPUT_FILE.pdf`
@@ -143,13 +144,17 @@ On Un\*x systems, `libreoffice` should be in your `$PATH`. On MacOS, you will
 find it under `/Applications/LibreOffice.app/Contents/MacOS/soffice`. On
 MS Windows, it is probably somewhere like `C:\\Program Files\\LibreOffice\\libreoffice.exe` (corrections are welcome).
 
+In order to make the PDF/A generation more stable, the
+[pdfa-lab](https://github.com/gflohr/pdfa-lab) project has been created.
+It is expected to be production-ready by the end of 2026.
+
 ## Reporting Bugs
 
 Please report bugs at https://github.com/gflohr/e-invoice-eu/issues.
 
 ## Copyright
 
-Copyright (C) 2024-2025 Guido Flohr <guido.flohr@cantanea.com>, all
+Copyright (C) 2024-2026 Guido Flohr <guido.flohr@cantanea.com>, all
 rights reserved.
 
 This is free software available under the terms of the

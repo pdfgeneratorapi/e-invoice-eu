@@ -1,13 +1,12 @@
-// FIXME! Name all the commands SubjectCommand so that we can import the
-// Invoice interface in a normal fashion.
 import {
 	Invoice as CoreInvoice,
 	InvoiceService,
 	InvoiceServiceOptions,
+	Mapping,
 	MappingService,
 } from '@e-invoice-eu/core';
-import { Mapping } from '@e-invoice-eu/core';
 import { Textdomain } from '@esgettext/runtime';
+import { type ErrorObject } from 'ajv';
 import { accessSync, statSync } from 'fs';
 import * as fs from 'fs/promises';
 import * as yaml from 'js-yaml';
@@ -134,7 +133,9 @@ const options: {
 		group: gtx._('Input data'),
 		type: 'string',
 		demandOption: false,
-		describe: gtx._('ID of the embedded PDF, defaults to the document number'),
+		describe: gtx._(
+			'ID of the embedded PDF, defaults to the document number',
+		),
 	},
 	'pdf-description': {
 		group: gtx._('Input data'),
@@ -236,7 +237,9 @@ export class Invoice implements Command {
 			typeof configOptions.mapping === 'undefined'
 		) {
 			throw new Error(
-				gtx._("One of the options '--invoice' or '--mapping' is mandatory."),
+				gtx._(
+					"One of the options '--invoice' or '--mapping' is mandatory.",
+				),
 			);
 		} else if (
 			typeof configOptions.mapping !== 'undefined' &&
@@ -261,9 +264,12 @@ export class Invoice implements Command {
 
 			if (!mimetype) {
 				throw new Error(
-					gtx._x("cannot guess MIME type of attachment '{filename}'!", {
-						filename,
-					}),
+					gtx._x(
+						"cannot guess MIME type of attachment '{filename}'!",
+						{
+							filename,
+						},
+					),
 				);
 			}
 
@@ -301,7 +307,11 @@ export class Invoice implements Command {
 			try {
 				invoiceData = JSON.parse(json) as CoreInvoice;
 			} catch (e) {
-				throw new Error(`${filename}: ${e.message}`);
+				if (e instanceof Error) {
+					throw new Error(`${filename}: ${e.message}`);
+				} else {
+					throw new Error(`${filename}: unknown error: ${e}`);
+				}
 			}
 		} else if (typeof configOptions.mapping !== 'undefined') {
 			if (typeof configOptions.spreadsheet == 'undefined') {
@@ -354,7 +364,11 @@ export class Invoice implements Command {
 			if (typeof configOptions.output === 'undefined') {
 				safeStdoutWrite(document);
 			} else {
-				await fs.writeFile(configOptions.output as string, document, 'utf-8');
+				await fs.writeFile(
+					configOptions.output as string,
+					document,
+					'utf-8',
+				);
 			}
 		} else {
 			if (typeof configOptions.output === 'undefined') {
@@ -376,18 +390,32 @@ export class Invoice implements Command {
 			await this.doRun(configOptions);
 			return 0;
 		} catch (e) {
-			if (e.ajv) {
+			if (
+				typeof e === 'object' &&
+				e !== null &&
+				'errors' in e &&
+				Array.isArray((e as { errors?: unknown }).errors)
+			) {
+				const errors = (e as { errors: ErrorObject[] }).errors;
+
 				console.error(
 					gtx._x('{programName}: fatal error:', {
 						programName: Package.getName(),
 					}),
-					e.errors,
+					errors,
+				);
+			} else if (e instanceof Error) {
+				console.error(
+					gtx._x('{programName}: Error: {error}', {
+						programName: Package.getName(),
+						error: e.message,
+					}),
 				);
 			} else {
 				console.error(
-					gtx._x('{programName}: {error}', {
+					gtx._x('{programName}: Error: {error}', {
 						programName: Package.getName(),
-						error: e,
+						error: String(e),
 					}),
 				);
 			}
