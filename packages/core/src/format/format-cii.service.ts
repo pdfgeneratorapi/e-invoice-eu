@@ -1145,6 +1145,8 @@ export const cacTaxSubtotal: Transformation[] = [
 		dest: ['ram:ExemptionReasonCode'],
 		fxProfileMask: FX_MASK_BASIC_WL,
 	},
+	// BT-7 and BT-8 land in every breakdown here;
+	// postProcessHeaderTaxDates() keeps them in the first one only.
 	{
 		type: 'string',
 		subtype: 'DateTimeString',
@@ -1880,6 +1882,29 @@ export class FormatCIIService
 		this.postProcessTradeDelivery(cii);
 		this.postProcessNotes(cii);
 		this.postProcessPriceAllowances(cii);
+		this.postProcessHeaderTaxDates(cii);
+	}
+
+	// BT-7 and BT-8 are document level, but CII places them in the VAT
+	// breakdown, which repeats per VAT rate.  CII-SR-461 allows a single
+	// TaxPointDate.  CII-SR-462 allows a single DueDateTypeCode in the CEN
+	// rules before 1.3.13 (still used by Mustang-based validators); later
+	// versions accept repeats of the same code.  Keeping both in the first
+	// breakdown passes every version.
+	private postProcessHeaderTaxDates(cii: ExpandObject) {
+		const taxes =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeSettlement']?.[
+				'ram:ApplicableTradeTax'
+			];
+		if (!Array.isArray(taxes)) return;
+
+		for (const tax of taxes.slice(1)) {
+			if (!tax) continue;
+			delete tax['ram:TaxPointDate'];
+			delete tax['ram:DueDateTypeCode'];
+		}
 	}
 
 	private postProcessSellerTradeParty(cii: ExpandObject) {

@@ -216,3 +216,83 @@ describe('CII mappings per Factur-X conformance level', () => {
 		);
 	});
 });
+
+describe('Document-level VAT dates with several VAT breakdowns', () => {
+	const subtotal = (percent: string) => ({
+		'cac:TaxCategory': {
+			'cbc:ID': 'S',
+			'cbc:Percent': percent,
+			'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+		},
+	});
+
+	const taxTotal = (subtotals: object[]) => ({
+		'cac:TaxTotal': [{ 'cac:TaxSubtotal': subtotals }],
+	});
+
+	const threeBreakdowns = taxTotal([
+		subtotal('19'),
+		subtotal('7'),
+		subtotal('10'),
+	]);
+
+	const headerBreakdowns = (xml: string): string[] =>
+		xml
+			.match(
+				/<ram:ApplicableHeaderTradeSettlement>[\s\S]*<\/ram:ApplicableHeaderTradeSettlement>/,
+			)?.[0]
+			.match(
+				/<ram:ApplicableTradeTax>[\s\S]*?<\/ram:ApplicableTradeTax>/g,
+			) ?? [];
+
+	const dates = [
+		{
+			term: 'BT-7 value added tax point date',
+			level: Level.EN16931,
+			data: { 'cbc:TaxPointDate': '2026-11-12' },
+			element: '<ram:TaxPointDate>',
+		},
+		{
+			term: 'BT-8 value added tax point date code',
+			level: Level.BasicWL,
+			data: { 'cac:InvoicePeriod': { 'cbc:DescriptionCode': '35' } },
+			element: '<ram:DueDateTypeCode>29</ram:DueDateTypeCode>',
+		},
+	];
+
+	describe.each(dates)('$term', ({ level, data, element }) => {
+		it.each(formats)(
+			'is written once by %s, in the first VAT breakdown',
+			async (format, Service, formatLevel) => {
+				const xml = await render(format, Service, {
+					...threeBreakdowns,
+					...data,
+				});
+				const [first, ...others] = headerBreakdowns(xml);
+
+				expect(others).toHaveLength(
+					formatLevel >= Level.BasicWL ? 2 : 0,
+				);
+				expect(xml.split(element)).toHaveLength(
+					formatLevel >= level ? 2 : 1,
+				);
+				if (formatLevel >= level) {
+					expect(first).toContain(element);
+					expect(first).toContain(
+						'<ram:RateApplicablePercent>19</ram:RateApplicablePercent>',
+					);
+				}
+			},
+		);
+	});
+
+	it('survives a VAT breakdown that maps to nothing', async () => {
+		const xml = await render(
+			'CII',
+			FormatCIIService,
+			taxTotal([subtotal('19'), {}, subtotal('7')]),
+		);
+
+		expect(headerBreakdowns(xml)).toHaveLength(2);
+	});
+});
