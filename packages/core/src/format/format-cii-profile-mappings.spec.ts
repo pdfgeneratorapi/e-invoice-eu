@@ -452,3 +452,84 @@ describe('VAT totals in two currencies', () => {
 		);
 	});
 });
+
+describe('Line allowances and charges', () => {
+	const invoiceLine = (chargeIndicator: string) => ({
+		'cac:InvoiceLine': [
+			{
+				'cbc:ID': '1',
+				'cbc:InvoicedQuantity': '1',
+				'cbc:InvoicedQuantity@unitCode': 'C62',
+				'cbc:LineExtensionAmount': '118.09',
+				'cbc:LineExtensionAmount@currencyID': 'EUR',
+				'cac:AllowanceCharge': [
+					{
+						'cbc:ChargeIndicator': chargeIndicator,
+						'cbc:AllowanceChargeReason': 'REASON-139',
+						'cbc:MultiplierFactorNumeric': '13.8',
+						'cbc:Amount': '18.91',
+						'cbc:Amount@currencyID': 'EUR',
+						'cbc:BaseAmount': '137.00',
+						'cbc:BaseAmount@currencyID': 'EUR',
+					},
+				],
+				'cac:Item': {
+					'cbc:Name': 'Item',
+					'cac:ClassifiedTaxCategory': {
+						'cbc:ID': 'S',
+						'cbc:Percent': '19',
+						'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+					},
+				},
+				'cac:Price': {
+					'cbc:PriceAmount': '137.00',
+					'cbc:PriceAmount@currencyID': 'EUR',
+				},
+			},
+		],
+	});
+
+	const lineAllowanceCharge = (xml: string): string | undefined =>
+		xml.match(
+			/<ram:SpecifiedLineTradeSettlement>[\s\S]*?<ram:SpecifiedTradeAllowanceCharge>([\s\S]*?)<\/ram:SpecifiedTradeAllowanceCharge>/,
+		)?.[1];
+
+	const kinds = [
+		{ term: 'allowance (BG-27)', chargeIndicator: 'false' },
+		{ term: 'charge (BG-28)', chargeIndicator: 'true' },
+	];
+
+	describe.each(kinds)('$term', ({ chargeIndicator }) => {
+		const indicator = `^\\s*<ram:ChargeIndicator>\\s*<udt:Indicator>${chargeIndicator}</udt:Indicator>\\s*</ram:ChargeIndicator>\\s*`;
+		const percentAndBase =
+			'<ram:CalculationPercent>13\\.8</ram:CalculationPercent>\\s*<ram:BasisAmount>137\\.00</ram:BasisAmount>\\s*';
+		const amountAndReason =
+			'<ram:ActualAmount>18\\.91</ram:ActualAmount>\\s*<ram:Reason>REASON-139</ram:Reason>\\s*$';
+
+		it.each(formats)(
+			'is written by %s, with the percentage and base amount from EN16931 up',
+			async (format, Service, formatLevel) => {
+				const xml = await render(
+					format,
+					Service,
+					invoiceLine(chargeIndicator),
+				);
+				const allowanceCharge = lineAllowanceCharge(xml);
+
+				if (formatLevel < Level.Basic) {
+					expect(allowanceCharge).toBeUndefined();
+				} else if (formatLevel < Level.EN16931) {
+					expect(allowanceCharge).toMatch(
+						new RegExp(indicator + amountAndReason),
+					);
+				} else {
+					expect(allowanceCharge).toMatch(
+						new RegExp(
+							indicator + percentAndBase + amountAndReason,
+						),
+					);
+				}
+			},
+		);
+	});
+});

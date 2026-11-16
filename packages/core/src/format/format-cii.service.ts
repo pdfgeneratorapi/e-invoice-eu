@@ -356,17 +356,19 @@ const cacInvoiceLineAllowanceCharge: Transformation = {
 			dest: ['ram:ChargeIndicator', 'udt:Indicator'],
 			fxProfileMask: FX_MASK_BASIC,
 		},
+		// Factur-X BASIC has the line allowance and charge amount and reason,
+		// but not the percentage and base amount.
 		{
 			type: 'string',
 			src: ['cbc:MultiplierFactorNumeric'],
 			dest: ['ram:CalculationPercent'],
-			fxProfileMask: FX_MASK_BASIC,
+			fxProfileMask: FX_MASK_EN16931,
 		},
 		{
 			type: 'string',
 			src: ['cbc:BaseAmount'],
 			dest: ['ram:BasisAmount'],
-			fxProfileMask: FX_MASK_BASIC,
+			fxProfileMask: FX_MASK_EN16931,
 		},
 		// currencyID omitted on BasisAmount and ActualAmount:
 		// CII-DT-031 forbids @currencyID on Amount elements (except TaxTotalAmount).
