@@ -1,5 +1,6 @@
 import { Invoice } from '@e-invoice-eu/core';
 import { type JSONSchemaType } from 'ajv';
+import { ValidationError } from 'ajv/dist/2019';
 import * as jsonpath from 'jsonpath-plus';
 import { ExpandObject } from 'xmlbuilder2/lib/interfaces';
 import { ValueAddedTaxPointDateCode } from '../invoice/invoice.interface';
@@ -1805,6 +1806,8 @@ export class FormatCIIService
 		invoice: Invoice,
 		options: InvoiceServiceOptions,
 	): Promise<string | Uint8Array> {
+		this.checkRoundingAmount(invoice);
+
 		const cii: ExpandObject = {};
 
 		this.convert(invoice, '$', cii, '$', [ublInvoice]);
@@ -1832,6 +1835,35 @@ export class FormatCIIService
 		}
 
 		return this.renderXML(cii);
+	}
+
+	// Factur-X BASIC and BASIC WL have no rounding amount (BT-114): their
+	// schemas do not contain ram:RoundingAmount.  Leaving it out would keep
+	// an amount due for payment (BT-115) that includes it, and the totals
+	// would no longer add up (BR-CO-16).  A zero rounding amount changes
+	// nothing and is left out.
+	private checkRoundingAmount(invoice: Invoice) {
+		if (!(this.fxProfile & (FX_BASIC | FX_BASIC_WL))) return;
+
+		const rounding =
+			invoice['ubl:Invoice']['cac:LegalMonetaryTotal']?.[
+				'cbc:PayableRoundingAmount'
+			];
+		if (typeof rounding === 'undefined' || Number(rounding) === 0) return;
+
+		throw new ValidationError([
+			{
+				instancePath:
+					'/ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount',
+				schemaPath: '',
+				keyword: 'fxProfile',
+				params: {},
+				message:
+					'The rounding amount (BT-114) cannot be expressed in' +
+					' Factur-X BASIC or BASIC WL. Use Factur-X EN16931 or a' +
+					' higher conformance level.',
+			},
+		]);
 	}
 
 	private postProcess(cii: ExpandObject, invoice: Invoice) {

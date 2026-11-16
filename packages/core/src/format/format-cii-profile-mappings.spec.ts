@@ -1,3 +1,4 @@
+import { ValidationError } from 'ajv/dist/2019';
 import { describe, expect, it } from 'vitest';
 
 import { Invoice } from '../invoice/invoice.interface';
@@ -530,6 +531,86 @@ describe('Line allowances and charges', () => {
 					);
 				}
 			},
+		);
+	});
+});
+
+describe('Rounding amount (BT-114)', () => {
+	const totals = (rounding: string, payable: string) => ({
+		'cbc:DocumentCurrencyCode': 'EUR',
+		'cac:TaxTotal': [
+			{
+				'cbc:TaxAmount': '19.00',
+				'cbc:TaxAmount@currencyID': 'EUR',
+				'cac:TaxSubtotal': [
+					{
+						'cbc:TaxableAmount': '99.99',
+						'cbc:TaxableAmount@currencyID': 'EUR',
+						'cbc:TaxAmount': '19.00',
+						'cbc:TaxAmount@currencyID': 'EUR',
+						'cac:TaxCategory': {
+							'cbc:ID': 'S',
+							'cbc:Percent': '19',
+							'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+						},
+					},
+				],
+			},
+		],
+		'cac:LegalMonetaryTotal': {
+			'cbc:LineExtensionAmount': '99.99',
+			'cbc:LineExtensionAmount@currencyID': 'EUR',
+			'cbc:TaxExclusiveAmount': '99.99',
+			'cbc:TaxExclusiveAmount@currencyID': 'EUR',
+			'cbc:TaxInclusiveAmount': '118.99',
+			'cbc:TaxInclusiveAmount@currencyID': 'EUR',
+			'cbc:PrepaidAmount': '50.00',
+			'cbc:PrepaidAmount@currencyID': 'EUR',
+			'cbc:PayableRoundingAmount': rounding,
+			'cbc:PayableRoundingAmount@currencyID': 'EUR',
+			'cbc:PayableAmount': payable,
+			'cbc:PayableAmount@currencyID': 'EUR',
+		},
+	});
+
+	it.each(formats)(
+		'is written by %s from EN16931 up, refused below it, and left out by Factur-X-Minimum',
+		async (format, Service, formatLevel) => {
+			const xml = render(format, Service, totals('0.01', '69.00'));
+
+			if (formatLevel >= Level.EN16931) {
+				expect(await xml).toMatch(
+					/<ram:TaxTotalAmount currencyID="EUR">19.00<\/ram:TaxTotalAmount>\s*<ram:RoundingAmount>0.01<\/ram:RoundingAmount>\s*<ram:GrandTotalAmount>118.99<\/ram:GrandTotalAmount>/,
+				);
+			} else if (formatLevel >= Level.BasicWL) {
+				await expect(xml).rejects.toBeInstanceOf(ValidationError);
+				await expect(xml).rejects.toMatchObject({
+					errors: [
+						{
+							instancePath:
+								'/ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount',
+							message: expect.stringMatching(
+								/BT-114.*BASIC.*BASIC WL.*EN16931/,
+							),
+						},
+					],
+				});
+			} else {
+				expect(await xml).not.toContain('<ram:RoundingAmount>');
+			}
+		},
+	);
+
+	it.each(
+		formats.filter(
+			([, , level]) => level === Level.Basic || level === Level.BasicWL,
+		),
+	)('is left out by %s when it is zero', async (format, Service) => {
+		const xml = await render(format, Service, totals('0.00', '68.99'));
+
+		expect(xml).not.toContain('<ram:RoundingAmount>');
+		expect(xml).toContain(
+			'<ram:DuePayableAmount>68.99</ram:DuePayableAmount>',
 		);
 	});
 });
