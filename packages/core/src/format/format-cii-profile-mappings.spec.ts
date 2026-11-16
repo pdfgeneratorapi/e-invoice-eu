@@ -149,6 +149,64 @@ const cases: MappingCase[] = [
 		expected:
 			/<ram:AdditionalReferencedDocument>\s*<ram:IssuerAssignedID>SUPPORTING-122<\/ram:IssuerAssignedID>\s*<ram:TypeCode>916<\/ram:TypeCode>\s*<\/ram:AdditionalReferencedDocument>\s*<ram:AdditionalReferencedDocument>\s*<ram:IssuerAssignedID>TENDER-17<\/ram:IssuerAssignedID>\s*<ram:TypeCode>50<\/ram:TypeCode>\s*<\/ram:AdditionalReferencedDocument>/,
 	},
+	{
+		term: 'BT-47 buyer legal registration identifier',
+		level: Level.Minimum,
+		data: {
+			'cac:AccountingCustomerParty': {
+				'cac:Party': {
+					'cac:PartyLegalEntity': {
+						'cbc:RegistrationName': 'Buyer',
+						'cbc:CompanyID': 'BUYER-47',
+						'cbc:CompanyID@schemeID': '0002',
+					},
+				},
+			},
+		},
+		marker: 'BUYER-47',
+		expected:
+			/<ram:BuyerTradeParty>\s*<ram:Name>Buyer<\/ram:Name>\s*<ram:SpecifiedLegalOrganization>\s*<ram:ID schemeID="0002">BUYER-47<\/ram:ID>\s*<\/ram:SpecifiedLegalOrganization>\s*<\/ram:BuyerTradeParty>/,
+	},
+	{
+		// The base invoice has no seller address, so the marker can only
+		// come from the buyer.
+		term: 'BG-8 buyer postal address',
+		level: Level.BasicWL,
+		data: {
+			'cac:AccountingCustomerParty': {
+				'cac:Party': {
+					'cac:PostalAddress': {
+						'cbc:StreetName': 'Buyer Street 8',
+						'cbc:CityName': 'Vienna',
+						'cbc:PostalZone': '1010',
+						'cac:Country': { 'cbc:IdentificationCode': 'AT' },
+					},
+					'cac:PartyLegalEntity': { 'cbc:RegistrationName': 'Buyer' },
+				},
+			},
+		},
+		marker: '<ram:PostalTradeAddress>',
+		expected:
+			/<ram:BuyerTradeParty>\s*<ram:Name>Buyer<\/ram:Name>\s*<ram:PostalTradeAddress>\s*<ram:PostcodeCode>1010<\/ram:PostcodeCode>\s*<ram:LineOne>Buyer Street 8<\/ram:LineOne>\s*<ram:CityName>Vienna<\/ram:CityName>\s*<ram:CountryID>AT<\/ram:CountryID>\s*<\/ram:PostalTradeAddress>\s*<\/ram:BuyerTradeParty>/,
+	},
+	{
+		term: 'BT-48 buyer VAT identifier',
+		level: Level.BasicWL,
+		data: {
+			'cac:AccountingCustomerParty': {
+				'cac:Party': {
+					'cac:PartyTaxScheme': {
+						'cbc:CompanyID': 'ATU48484848',
+						'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+					},
+					'cac:PartyLegalEntity': { 'cbc:RegistrationName': 'Buyer' },
+				},
+			},
+		},
+		marker: 'ATU48484848',
+		expected:
+			/<ram:BuyerTradeParty>\s*<ram:Name>Buyer<\/ram:Name>\s*<ram:SpecifiedTaxRegistration>\s*<ram:ID schemeID="VA">ATU48484848<\/ram:ID>\s*<\/ram:SpecifiedTaxRegistration>\s*<\/ram:BuyerTradeParty>/,
+	},
 ];
 
 const render = async (

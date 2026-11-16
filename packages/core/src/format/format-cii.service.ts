@@ -800,12 +800,14 @@ export const cacAccountingCustomerParty: Transformation[] = [
 		],
 		fxProfileMask: FX_MASK_EN16931,
 	},
+	// Factur-X MINIMUM allows only the buyer's name and legal registration
+	// identifier.  The address and the VAT identifier start at BASIC WL.
 	{
 		type: 'object',
 		src: ['cac:PostalAddress'],
 		dest: ['ram:PostalTradeAddress'],
 		children: cacPostalAddress,
-		fxProfileMask: FX_MASK_MINIMUM,
+		fxProfileMask: FX_MASK_BASIC_WL,
 	},
 	{
 		type: 'string',
@@ -824,7 +826,7 @@ export const cacAccountingCustomerParty: Transformation[] = [
 		src: ['cac:PartyTaxScheme'],
 		dest: ['ram:SpecifiedTaxRegistration'],
 		children: cacPartyTaxScheme,
-		fxProfileMask: FX_MASK_MINIMUM,
+		fxProfileMask: FX_MASK_BASIC_WL,
 	},
 ];
 
