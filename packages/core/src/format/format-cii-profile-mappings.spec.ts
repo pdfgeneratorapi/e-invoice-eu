@@ -354,3 +354,101 @@ describe('Document-level VAT dates with several VAT breakdowns', () => {
 		expect(headerBreakdowns(xml)).toHaveLength(2);
 	});
 });
+
+describe('VAT totals in two currencies', () => {
+	const vatTotals = (currencies: { document: string; tax?: string }) => ({
+		'cbc:DocumentCurrencyCode': currencies.document,
+		...(currencies.tax ? { 'cbc:TaxCurrencyCode': currencies.tax } : {}),
+		'cac:TaxTotal': [
+			{
+				'cbc:TaxAmount': '19.00',
+				'cbc:TaxAmount@currencyID': currencies.document,
+				'cac:TaxSubtotal': [
+					{
+						'cbc:TaxableAmount': '100.00',
+						'cbc:TaxableAmount@currencyID': currencies.document,
+						'cbc:TaxAmount': '19.00',
+						'cbc:TaxAmount@currencyID': currencies.document,
+						'cac:TaxCategory': {
+							'cbc:ID': 'S',
+							'cbc:Percent': '19',
+							'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+						},
+					},
+				],
+			},
+			...(currencies.tax
+				? [
+						{
+							'cbc:TaxAmount': '17.11',
+							'cbc:TaxAmount@currencyID': currencies.tax,
+						},
+					]
+				: []),
+		],
+		'cac:LegalMonetaryTotal': {
+			'cbc:LineExtensionAmount': '100.00',
+			'cbc:LineExtensionAmount@currencyID': currencies.document,
+			'cbc:TaxExclusiveAmount': '100.00',
+			'cbc:TaxExclusiveAmount@currencyID': currencies.document,
+			'cbc:TaxInclusiveAmount': '119.00',
+			'cbc:TaxInclusiveAmount@currencyID': currencies.document,
+			'cbc:PayableAmount': '119.00',
+			'cbc:PayableAmount@currencyID': currencies.document,
+		},
+	});
+
+	it.each(formats)(
+		'are both written by %s with the VAT accounting currency, or only the one in the invoice currency without it',
+		async (format, Service, formatLevel) => {
+			const xml = await render(
+				format,
+				Service,
+				vatTotals({ document: 'USD', tax: 'EUR' }),
+			);
+
+			expect(xml).toContain(
+				'<ram:TaxTotalAmount currencyID="USD">19.00</ram:TaxTotalAmount>',
+			);
+			if (formatLevel >= Level.BasicWL) {
+				expect(xml).toMatch(
+					/<ram:TaxCurrencyCode>EUR<\/ram:TaxCurrencyCode>\s*<ram:InvoiceCurrencyCode>USD<\/ram:InvoiceCurrencyCode>/,
+				);
+				expect(xml).toContain(
+					'<ram:TaxTotalAmount currencyID="EUR">17.11</ram:TaxTotalAmount>',
+				);
+			} else {
+				expect(xml).not.toContain('<ram:TaxCurrencyCode>');
+				expect(xml).not.toContain('currencyID="EUR"');
+			}
+		},
+	);
+
+	it.each(formats)(
+		'keep the single VAT total of %s when there is no VAT accounting currency',
+		async (format, Service) => {
+			const xml = await render(
+				format,
+				Service,
+				vatTotals({ document: 'EUR' }),
+			);
+
+			expect(xml.match(/<ram:TaxTotalAmount\b/g)).toHaveLength(1);
+			expect(xml).toContain(
+				'<ram:TaxTotalAmount currencyID="EUR">19.00</ram:TaxTotalAmount>',
+			);
+		},
+	);
+
+	it('keep the VAT total in the invoice currency of Factur-X-Minimum when the VAT accounting currency is the same', async () => {
+		const xml = await render(
+			'Factur-X-Minimum',
+			FormatFacturXMinimumService,
+			vatTotals({ document: 'EUR', tax: 'EUR' }),
+		);
+
+		expect(xml).toContain(
+			'<ram:TaxTotalAmount currencyID="EUR">19.00</ram:TaxTotalAmount>',
+		);
+	});
+});

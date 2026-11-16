@@ -1823,7 +1823,7 @@ export class FormatCIIService
 		cii['rsm:CrossIndustryInvoice@xmlns:ram'] =
 			'urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100';
 
-		this.postProcess(cii);
+		this.postProcess(cii, invoice);
 
 		if (options.postProcessor) {
 			await options.postProcessor(cii);
@@ -1832,7 +1832,7 @@ export class FormatCIIService
 		return this.renderXML(cii);
 	}
 
-	private postProcess(cii: ExpandObject) {
+	private postProcess(cii: ExpandObject, invoice: Invoice) {
 		this.postProcessSellerTradeParty(cii);
 		this.postProcessPayeeParty(cii);
 
@@ -1885,6 +1885,7 @@ export class FormatCIIService
 		this.postProcessNotes(cii);
 		this.postProcessPriceAllowances(cii);
 		this.postProcessHeaderTaxDates(cii);
+		this.postProcessMinimumTaxTotals(cii, invoice);
 	}
 
 	// BT-7 and BT-8 are document level, but CII places them in the VAT
@@ -1907,6 +1908,36 @@ export class FormatCIIService
 			delete tax['ram:TaxPointDate'];
 			delete tax['ram:DueDateTypeCode'];
 		}
+	}
+
+	// Factur-X MINIMUM has no VAT accounting currency code (BT-6): its
+	// schema does not contain ram:TaxCurrencyCode.  Without it, the VAT
+	// total in that currency (BT-111) is a VAT total in a currency the
+	// invoice does not declare, which MINIMUM does not allow.  Only the VAT
+	// total in the invoice currency (BT-110) is kept.
+	private postProcessMinimumTaxTotals(cii: ExpandObject, invoice: Invoice) {
+		if (this.fxProfile !== FX_MINIMUM) return;
+
+		const taxCurrency = invoice['ubl:Invoice']['cbc:TaxCurrencyCode'];
+		if (
+			typeof taxCurrency === 'undefined' ||
+			taxCurrency === invoice['ubl:Invoice']['cbc:DocumentCurrencyCode']
+		) {
+			return;
+		}
+
+		const summation =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeSettlement']?.[
+				'ram:SpecifiedTradeSettlementHeaderMonetarySummation'
+			];
+		const totals = summation?.['ram:TaxTotalAmount'];
+		if (!Array.isArray(totals)) return;
+
+		summation['ram:TaxTotalAmount'] = totals.filter(
+			total => total?.['#@currencyID'] !== taxCurrency,
+		);
 	}
 
 	private postProcessSellerTradeParty(cii: ExpandObject) {
