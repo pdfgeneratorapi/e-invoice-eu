@@ -1,3 +1,4 @@
+import { ValidationError } from 'ajv/dist/2019';
 import { describe, expect, it } from 'vitest';
 
 import { Invoice } from '../invoice/invoice.interface';
@@ -149,6 +150,64 @@ const cases: MappingCase[] = [
 		expected:
 			/<ram:AdditionalReferencedDocument>\s*<ram:IssuerAssignedID>SUPPORTING-122<\/ram:IssuerAssignedID>\s*<ram:TypeCode>916<\/ram:TypeCode>\s*<\/ram:AdditionalReferencedDocument>\s*<ram:AdditionalReferencedDocument>\s*<ram:IssuerAssignedID>TENDER-17<\/ram:IssuerAssignedID>\s*<ram:TypeCode>50<\/ram:TypeCode>\s*<\/ram:AdditionalReferencedDocument>/,
 	},
+	{
+		term: 'BT-47 buyer legal registration identifier',
+		level: Level.Minimum,
+		data: {
+			'cac:AccountingCustomerParty': {
+				'cac:Party': {
+					'cac:PartyLegalEntity': {
+						'cbc:RegistrationName': 'Buyer',
+						'cbc:CompanyID': 'BUYER-47',
+						'cbc:CompanyID@schemeID': '0002',
+					},
+				},
+			},
+		},
+		marker: 'BUYER-47',
+		expected:
+			/<ram:BuyerTradeParty>\s*<ram:Name>Buyer<\/ram:Name>\s*<ram:SpecifiedLegalOrganization>\s*<ram:ID schemeID="0002">BUYER-47<\/ram:ID>\s*<\/ram:SpecifiedLegalOrganization>\s*<\/ram:BuyerTradeParty>/,
+	},
+	{
+		// The base invoice has no seller address, so the marker can only
+		// come from the buyer.
+		term: 'BG-8 buyer postal address',
+		level: Level.BasicWL,
+		data: {
+			'cac:AccountingCustomerParty': {
+				'cac:Party': {
+					'cac:PostalAddress': {
+						'cbc:StreetName': 'Buyer Street 8',
+						'cbc:CityName': 'Vienna',
+						'cbc:PostalZone': '1010',
+						'cac:Country': { 'cbc:IdentificationCode': 'AT' },
+					},
+					'cac:PartyLegalEntity': { 'cbc:RegistrationName': 'Buyer' },
+				},
+			},
+		},
+		marker: '<ram:PostalTradeAddress>',
+		expected:
+			/<ram:BuyerTradeParty>\s*<ram:Name>Buyer<\/ram:Name>\s*<ram:PostalTradeAddress>\s*<ram:PostcodeCode>1010<\/ram:PostcodeCode>\s*<ram:LineOne>Buyer Street 8<\/ram:LineOne>\s*<ram:CityName>Vienna<\/ram:CityName>\s*<ram:CountryID>AT<\/ram:CountryID>\s*<\/ram:PostalTradeAddress>\s*<\/ram:BuyerTradeParty>/,
+	},
+	{
+		term: 'BT-48 buyer VAT identifier',
+		level: Level.BasicWL,
+		data: {
+			'cac:AccountingCustomerParty': {
+				'cac:Party': {
+					'cac:PartyTaxScheme': {
+						'cbc:CompanyID': 'ATU48484848',
+						'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+					},
+					'cac:PartyLegalEntity': { 'cbc:RegistrationName': 'Buyer' },
+				},
+			},
+		},
+		marker: 'ATU48484848',
+		expected:
+			/<ram:BuyerTradeParty>\s*<ram:Name>Buyer<\/ram:Name>\s*<ram:SpecifiedTaxRegistration>\s*<ram:ID schemeID="VA">ATU48484848<\/ram:ID>\s*<\/ram:SpecifiedTaxRegistration>\s*<\/ram:BuyerTradeParty>/,
+	},
 ];
 
 const render = async (
@@ -213,6 +272,345 @@ describe('CII mappings per Factur-X conformance level', () => {
 					expect(xml).not.toContain(marker);
 				}
 			},
+		);
+	});
+});
+
+describe('Document-level VAT dates with several VAT breakdowns', () => {
+	const subtotal = (percent: string) => ({
+		'cac:TaxCategory': {
+			'cbc:ID': 'S',
+			'cbc:Percent': percent,
+			'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+		},
+	});
+
+	const taxTotal = (subtotals: object[]) => ({
+		'cac:TaxTotal': [{ 'cac:TaxSubtotal': subtotals }],
+	});
+
+	const threeBreakdowns = taxTotal([
+		subtotal('19'),
+		subtotal('7'),
+		subtotal('10'),
+	]);
+
+	const headerBreakdowns = (xml: string): string[] =>
+		xml
+			.match(
+				/<ram:ApplicableHeaderTradeSettlement>[\s\S]*<\/ram:ApplicableHeaderTradeSettlement>/,
+			)?.[0]
+			.match(
+				/<ram:ApplicableTradeTax>[\s\S]*?<\/ram:ApplicableTradeTax>/g,
+			) ?? [];
+
+	const dates = [
+		{
+			term: 'BT-7 value added tax point date',
+			level: Level.EN16931,
+			data: { 'cbc:TaxPointDate': '2026-11-12' },
+			element: '<ram:TaxPointDate>',
+		},
+		{
+			term: 'BT-8 value added tax point date code',
+			level: Level.BasicWL,
+			data: { 'cac:InvoicePeriod': { 'cbc:DescriptionCode': '35' } },
+			element: '<ram:DueDateTypeCode>29</ram:DueDateTypeCode>',
+		},
+	];
+
+	describe.each(dates)('$term', ({ level, data, element }) => {
+		it.each(formats)(
+			'is written once by %s, in the first VAT breakdown',
+			async (format, Service, formatLevel) => {
+				const xml = await render(format, Service, {
+					...threeBreakdowns,
+					...data,
+				});
+				const [first, ...others] = headerBreakdowns(xml);
+
+				expect(others).toHaveLength(
+					formatLevel >= Level.BasicWL ? 2 : 0,
+				);
+				expect(xml.split(element)).toHaveLength(
+					formatLevel >= level ? 2 : 1,
+				);
+				if (formatLevel >= level) {
+					expect(first).toContain(element);
+					expect(first).toContain(
+						'<ram:RateApplicablePercent>19</ram:RateApplicablePercent>',
+					);
+				}
+			},
+		);
+	});
+
+	it('survives a VAT breakdown that maps to nothing', async () => {
+		const xml = await render(
+			'CII',
+			FormatCIIService,
+			taxTotal([subtotal('19'), {}, subtotal('7')]),
+		);
+
+		expect(headerBreakdowns(xml)).toHaveLength(2);
+	});
+});
+
+describe('VAT totals in two currencies', () => {
+	const vatTotals = (currencies: { document: string; tax?: string }) => ({
+		'cbc:DocumentCurrencyCode': currencies.document,
+		...(currencies.tax ? { 'cbc:TaxCurrencyCode': currencies.tax } : {}),
+		'cac:TaxTotal': [
+			{
+				'cbc:TaxAmount': '19.00',
+				'cbc:TaxAmount@currencyID': currencies.document,
+				'cac:TaxSubtotal': [
+					{
+						'cbc:TaxableAmount': '100.00',
+						'cbc:TaxableAmount@currencyID': currencies.document,
+						'cbc:TaxAmount': '19.00',
+						'cbc:TaxAmount@currencyID': currencies.document,
+						'cac:TaxCategory': {
+							'cbc:ID': 'S',
+							'cbc:Percent': '19',
+							'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+						},
+					},
+				],
+			},
+			...(currencies.tax
+				? [
+						{
+							'cbc:TaxAmount': '17.11',
+							'cbc:TaxAmount@currencyID': currencies.tax,
+						},
+					]
+				: []),
+		],
+		'cac:LegalMonetaryTotal': {
+			'cbc:LineExtensionAmount': '100.00',
+			'cbc:LineExtensionAmount@currencyID': currencies.document,
+			'cbc:TaxExclusiveAmount': '100.00',
+			'cbc:TaxExclusiveAmount@currencyID': currencies.document,
+			'cbc:TaxInclusiveAmount': '119.00',
+			'cbc:TaxInclusiveAmount@currencyID': currencies.document,
+			'cbc:PayableAmount': '119.00',
+			'cbc:PayableAmount@currencyID': currencies.document,
+		},
+	});
+
+	it.each(formats)(
+		'are both written by %s with the VAT accounting currency, or only the one in the invoice currency without it',
+		async (format, Service, formatLevel) => {
+			const xml = await render(
+				format,
+				Service,
+				vatTotals({ document: 'USD', tax: 'EUR' }),
+			);
+
+			expect(xml).toContain(
+				'<ram:TaxTotalAmount currencyID="USD">19.00</ram:TaxTotalAmount>',
+			);
+			if (formatLevel >= Level.BasicWL) {
+				expect(xml).toMatch(
+					/<ram:TaxCurrencyCode>EUR<\/ram:TaxCurrencyCode>\s*<ram:InvoiceCurrencyCode>USD<\/ram:InvoiceCurrencyCode>/,
+				);
+				expect(xml).toContain(
+					'<ram:TaxTotalAmount currencyID="EUR">17.11</ram:TaxTotalAmount>',
+				);
+			} else {
+				expect(xml).not.toContain('<ram:TaxCurrencyCode>');
+				expect(xml).not.toContain('currencyID="EUR"');
+			}
+		},
+	);
+
+	it.each(formats)(
+		'keep the single VAT total of %s when there is no VAT accounting currency',
+		async (format, Service) => {
+			const xml = await render(
+				format,
+				Service,
+				vatTotals({ document: 'EUR' }),
+			);
+
+			expect(xml.match(/<ram:TaxTotalAmount\b/g)).toHaveLength(1);
+			expect(xml).toContain(
+				'<ram:TaxTotalAmount currencyID="EUR">19.00</ram:TaxTotalAmount>',
+			);
+		},
+	);
+
+	it('keep the VAT total in the invoice currency of Factur-X-Minimum when the VAT accounting currency is the same', async () => {
+		const xml = await render(
+			'Factur-X-Minimum',
+			FormatFacturXMinimumService,
+			vatTotals({ document: 'EUR', tax: 'EUR' }),
+		);
+
+		expect(xml).toContain(
+			'<ram:TaxTotalAmount currencyID="EUR">19.00</ram:TaxTotalAmount>',
+		);
+	});
+});
+
+describe('Line allowances and charges', () => {
+	const invoiceLine = (chargeIndicator: string) => ({
+		'cac:InvoiceLine': [
+			{
+				'cbc:ID': '1',
+				'cbc:InvoicedQuantity': '1',
+				'cbc:InvoicedQuantity@unitCode': 'C62',
+				'cbc:LineExtensionAmount': '118.09',
+				'cbc:LineExtensionAmount@currencyID': 'EUR',
+				'cac:AllowanceCharge': [
+					{
+						'cbc:ChargeIndicator': chargeIndicator,
+						'cbc:AllowanceChargeReason': 'REASON-139',
+						'cbc:MultiplierFactorNumeric': '13.8',
+						'cbc:Amount': '18.91',
+						'cbc:Amount@currencyID': 'EUR',
+						'cbc:BaseAmount': '137.00',
+						'cbc:BaseAmount@currencyID': 'EUR',
+					},
+				],
+				'cac:Item': {
+					'cbc:Name': 'Item',
+					'cac:ClassifiedTaxCategory': {
+						'cbc:ID': 'S',
+						'cbc:Percent': '19',
+						'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+					},
+				},
+				'cac:Price': {
+					'cbc:PriceAmount': '137.00',
+					'cbc:PriceAmount@currencyID': 'EUR',
+				},
+			},
+		],
+	});
+
+	const lineAllowanceCharge = (xml: string): string | undefined =>
+		xml.match(
+			/<ram:SpecifiedLineTradeSettlement>[\s\S]*?<ram:SpecifiedTradeAllowanceCharge>([\s\S]*?)<\/ram:SpecifiedTradeAllowanceCharge>/,
+		)?.[1];
+
+	const kinds = [
+		{ term: 'allowance (BG-27)', chargeIndicator: 'false' },
+		{ term: 'charge (BG-28)', chargeIndicator: 'true' },
+	];
+
+	describe.each(kinds)('$term', ({ chargeIndicator }) => {
+		const indicator = `^\\s*<ram:ChargeIndicator>\\s*<udt:Indicator>${chargeIndicator}</udt:Indicator>\\s*</ram:ChargeIndicator>\\s*`;
+		const percentAndBase =
+			'<ram:CalculationPercent>13\\.8</ram:CalculationPercent>\\s*<ram:BasisAmount>137\\.00</ram:BasisAmount>\\s*';
+		const amountAndReason =
+			'<ram:ActualAmount>18\\.91</ram:ActualAmount>\\s*<ram:Reason>REASON-139</ram:Reason>\\s*$';
+
+		it.each(formats)(
+			'is written by %s, with the percentage and base amount from EN16931 up',
+			async (format, Service, formatLevel) => {
+				const xml = await render(
+					format,
+					Service,
+					invoiceLine(chargeIndicator),
+				);
+				const allowanceCharge = lineAllowanceCharge(xml);
+
+				if (formatLevel < Level.Basic) {
+					expect(allowanceCharge).toBeUndefined();
+				} else if (formatLevel < Level.EN16931) {
+					expect(allowanceCharge).toMatch(
+						new RegExp(indicator + amountAndReason),
+					);
+				} else {
+					expect(allowanceCharge).toMatch(
+						new RegExp(
+							indicator + percentAndBase + amountAndReason,
+						),
+					);
+				}
+			},
+		);
+	});
+});
+
+describe('Rounding amount (BT-114)', () => {
+	const totals = (rounding: string, payable: string) => ({
+		'cbc:DocumentCurrencyCode': 'EUR',
+		'cac:TaxTotal': [
+			{
+				'cbc:TaxAmount': '19.00',
+				'cbc:TaxAmount@currencyID': 'EUR',
+				'cac:TaxSubtotal': [
+					{
+						'cbc:TaxableAmount': '99.99',
+						'cbc:TaxableAmount@currencyID': 'EUR',
+						'cbc:TaxAmount': '19.00',
+						'cbc:TaxAmount@currencyID': 'EUR',
+						'cac:TaxCategory': {
+							'cbc:ID': 'S',
+							'cbc:Percent': '19',
+							'cac:TaxScheme': { 'cbc:ID': 'VAT' },
+						},
+					},
+				],
+			},
+		],
+		'cac:LegalMonetaryTotal': {
+			'cbc:LineExtensionAmount': '99.99',
+			'cbc:LineExtensionAmount@currencyID': 'EUR',
+			'cbc:TaxExclusiveAmount': '99.99',
+			'cbc:TaxExclusiveAmount@currencyID': 'EUR',
+			'cbc:TaxInclusiveAmount': '118.99',
+			'cbc:TaxInclusiveAmount@currencyID': 'EUR',
+			'cbc:PrepaidAmount': '50.00',
+			'cbc:PrepaidAmount@currencyID': 'EUR',
+			'cbc:PayableRoundingAmount': rounding,
+			'cbc:PayableRoundingAmount@currencyID': 'EUR',
+			'cbc:PayableAmount': payable,
+			'cbc:PayableAmount@currencyID': 'EUR',
+		},
+	});
+
+	it.each(formats)(
+		'is written by %s from EN16931 up, refused below it, and left out by Factur-X-Minimum',
+		async (format, Service, formatLevel) => {
+			const xml = render(format, Service, totals('0.01', '69.00'));
+
+			if (formatLevel >= Level.EN16931) {
+				expect(await xml).toMatch(
+					/<ram:TaxTotalAmount currencyID="EUR">19.00<\/ram:TaxTotalAmount>\s*<ram:RoundingAmount>0.01<\/ram:RoundingAmount>\s*<ram:GrandTotalAmount>118.99<\/ram:GrandTotalAmount>/,
+				);
+			} else if (formatLevel >= Level.BasicWL) {
+				await expect(xml).rejects.toBeInstanceOf(ValidationError);
+				await expect(xml).rejects.toMatchObject({
+					errors: [
+						{
+							instancePath:
+								'/ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount',
+							message: expect.stringMatching(
+								/BT-114.*BASIC.*BASIC WL.*EN16931/,
+							),
+						},
+					],
+				});
+			} else {
+				expect(await xml).not.toContain('<ram:RoundingAmount>');
+			}
+		},
+	);
+
+	it.each(
+		formats.filter(
+			([, , level]) => level === Level.Basic || level === Level.BasicWL,
+		),
+	)('is left out by %s when it is zero', async (format, Service) => {
+		const xml = await render(format, Service, totals('0.00', '68.99'));
+
+		expect(xml).not.toContain('<ram:RoundingAmount>');
+		expect(xml).toContain(
+			'<ram:DuePayableAmount>68.99</ram:DuePayableAmount>',
 		);
 	});
 });

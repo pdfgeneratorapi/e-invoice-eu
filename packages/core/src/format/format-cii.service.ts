@@ -1,5 +1,6 @@
 import { Invoice } from '@e-invoice-eu/core';
 import { type JSONSchemaType } from 'ajv';
+import { ValidationError } from 'ajv/dist/2019';
 import * as jsonpath from 'jsonpath-plus';
 import { ExpandObject } from 'xmlbuilder2/lib/interfaces';
 import { ValueAddedTaxPointDateCode } from '../invoice/invoice.interface';
@@ -356,17 +357,19 @@ const cacInvoiceLineAllowanceCharge: Transformation = {
 			dest: ['ram:ChargeIndicator', 'udt:Indicator'],
 			fxProfileMask: FX_MASK_BASIC,
 		},
+		// Factur-X BASIC has the line allowance and charge amount and reason,
+		// but not the percentage and base amount.
 		{
 			type: 'string',
 			src: ['cbc:MultiplierFactorNumeric'],
 			dest: ['ram:CalculationPercent'],
-			fxProfileMask: FX_MASK_BASIC,
+			fxProfileMask: FX_MASK_EN16931,
 		},
 		{
 			type: 'string',
 			src: ['cbc:BaseAmount'],
 			dest: ['ram:BasisAmount'],
-			fxProfileMask: FX_MASK_BASIC,
+			fxProfileMask: FX_MASK_EN16931,
 		},
 		// currencyID omitted on BasisAmount and ActualAmount:
 		// CII-DT-031 forbids @currencyID on Amount elements (except TaxTotalAmount).
@@ -800,12 +803,14 @@ export const cacAccountingCustomerParty: Transformation[] = [
 		],
 		fxProfileMask: FX_MASK_EN16931,
 	},
+	// Factur-X MINIMUM allows only the buyer's name and legal registration
+	// identifier.  The address and the VAT identifier start at BASIC WL.
 	{
 		type: 'object',
 		src: ['cac:PostalAddress'],
 		dest: ['ram:PostalTradeAddress'],
 		children: cacPostalAddress,
-		fxProfileMask: FX_MASK_MINIMUM,
+		fxProfileMask: FX_MASK_BASIC_WL,
 	},
 	{
 		type: 'string',
@@ -824,7 +829,7 @@ export const cacAccountingCustomerParty: Transformation[] = [
 		src: ['cac:PartyTaxScheme'],
 		dest: ['ram:SpecifiedTaxRegistration'],
 		children: cacPartyTaxScheme,
-		fxProfileMask: FX_MASK_MINIMUM,
+		fxProfileMask: FX_MASK_BASIC_WL,
 	},
 ];
 
@@ -1145,6 +1150,8 @@ export const cacTaxSubtotal: Transformation[] = [
 		dest: ['ram:ExemptionReasonCode'],
 		fxProfileMask: FX_MASK_BASIC_WL,
 	},
+	// BT-7 and BT-8 land in every breakdown here;
+	// postProcessHeaderTaxDates() keeps them in the first one only.
 	{
 		type: 'string',
 		subtype: 'DateTimeString',
@@ -1799,6 +1806,8 @@ export class FormatCIIService
 		invoice: Invoice,
 		options: InvoiceServiceOptions,
 	): Promise<string | Uint8Array> {
+		this.checkRoundingAmount(invoice);
+
 		const cii: ExpandObject = {};
 
 		this.convert(invoice, '$', cii, '$', [ublInvoice]);
@@ -1819,7 +1828,7 @@ export class FormatCIIService
 		cii['rsm:CrossIndustryInvoice@xmlns:ram'] =
 			'urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100';
 
-		this.postProcess(cii);
+		this.postProcess(cii, invoice);
 
 		if (options.postProcessor) {
 			await options.postProcessor(cii);
@@ -1828,7 +1837,36 @@ export class FormatCIIService
 		return this.renderXML(cii);
 	}
 
-	private postProcess(cii: ExpandObject) {
+	// Factur-X BASIC and BASIC WL have no rounding amount (BT-114): their
+	// schemas do not contain ram:RoundingAmount.  Leaving it out would keep
+	// an amount due for payment (BT-115) that includes it, and the totals
+	// would no longer add up (BR-CO-16).  A zero rounding amount changes
+	// nothing and is left out.
+	private checkRoundingAmount(invoice: Invoice) {
+		if (!(this.fxProfile & (FX_BASIC | FX_BASIC_WL))) return;
+
+		const rounding =
+			invoice['ubl:Invoice']['cac:LegalMonetaryTotal']?.[
+				'cbc:PayableRoundingAmount'
+			];
+		if (typeof rounding === 'undefined' || Number(rounding) === 0) return;
+
+		throw new ValidationError([
+			{
+				instancePath:
+					'/ubl:Invoice/cac:LegalMonetaryTotal/cbc:PayableRoundingAmount',
+				schemaPath: '',
+				keyword: 'fxProfile',
+				params: {},
+				message:
+					'The rounding amount (BT-114) cannot be expressed in' +
+					' Factur-X BASIC or BASIC WL. Use Factur-X EN16931 or a' +
+					' higher conformance level.',
+			},
+		]);
+	}
+
+	private postProcess(cii: ExpandObject, invoice: Invoice) {
 		this.postProcessSellerTradeParty(cii);
 		this.postProcessPayeeParty(cii);
 
@@ -1880,6 +1918,60 @@ export class FormatCIIService
 		this.postProcessTradeDelivery(cii);
 		this.postProcessNotes(cii);
 		this.postProcessPriceAllowances(cii);
+		this.postProcessHeaderTaxDates(cii);
+		this.postProcessMinimumTaxTotals(cii, invoice);
+	}
+
+	// BT-7 and BT-8 are document level, but CII places them in the VAT
+	// breakdown, which repeats per VAT rate.  CII-SR-461 allows a single
+	// TaxPointDate.  CII-SR-462 allows a single DueDateTypeCode in the CEN
+	// rules before 1.3.13 (still used by Mustang-based validators); later
+	// versions accept repeats of the same code.  Keeping both in the first
+	// breakdown passes every version.
+	private postProcessHeaderTaxDates(cii: ExpandObject) {
+		const taxes =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeSettlement']?.[
+				'ram:ApplicableTradeTax'
+			];
+		if (!Array.isArray(taxes)) return;
+
+		for (const tax of taxes.slice(1)) {
+			if (!tax) continue;
+			delete tax['ram:TaxPointDate'];
+			delete tax['ram:DueDateTypeCode'];
+		}
+	}
+
+	// Factur-X MINIMUM has no VAT accounting currency code (BT-6): its
+	// schema does not contain ram:TaxCurrencyCode.  Without it, the VAT
+	// total in that currency (BT-111) is a VAT total in a currency the
+	// invoice does not declare, which MINIMUM does not allow.  Only the VAT
+	// total in the invoice currency (BT-110) is kept.
+	private postProcessMinimumTaxTotals(cii: ExpandObject, invoice: Invoice) {
+		if (this.fxProfile !== FX_MINIMUM) return;
+
+		const taxCurrency = invoice['ubl:Invoice']['cbc:TaxCurrencyCode'];
+		if (
+			typeof taxCurrency === 'undefined' ||
+			taxCurrency === invoice['ubl:Invoice']['cbc:DocumentCurrencyCode']
+		) {
+			return;
+		}
+
+		const summation =
+			cii['rsm:CrossIndustryInvoice']?.[
+				'rsm:SupplyChainTradeTransaction'
+			]?.['ram:ApplicableHeaderTradeSettlement']?.[
+				'ram:SpecifiedTradeSettlementHeaderMonetarySummation'
+			];
+		const totals = summation?.['ram:TaxTotalAmount'];
+		if (!Array.isArray(totals)) return;
+
+		summation['ram:TaxTotalAmount'] = totals.filter(
+			total => total?.['#@currencyID'] !== taxCurrency,
+		);
 	}
 
 	private postProcessSellerTradeParty(cii: ExpandObject) {
